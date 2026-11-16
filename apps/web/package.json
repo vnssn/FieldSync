@@ -1,0 +1,29 @@
+{
+  "name": "@fieldsync/web",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --configLoader native --host 127.0.0.1",
+    "build": "vite build --configLoader native",
+    "preview": "vite preview --configLoader native --host 127.0.0.1"
+  },
+  "dependencies": {
+    "@fieldsync/contracts": "*",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1",
+    "react-router-dom": "^7.8.0",
+    "react-hook-form": "^7.62.0",
+    "@hookform/resolvers": "^5.2.1",
+    "@tanstack/react-query": "^5.85.3",
+    "dexie": "^4.2.0",
+    "dexie-react-hooks": "^4.2.0",
+    "zod": "^4.1.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.1.12",
+    "@vitejs/plugin-react": "^6.3.0",
+    "tailwindcss": "^4.1.12",
+    "vite": "^8.3.8"
+  }
+}
