@@ -10,10 +10,14 @@ import { createRequireAuth } from './modules/auth/middleware.js';
 import { createAuthRouter } from './modules/auth/routes.js';
 import { createUsersRouter } from './modules/users/routes.js';
 import { createAssetsRouter } from './modules/assets/routes.js';
+import { createTemplatesRouter } from './modules/templates/routes.js';
+import { createInspectionsRouter } from './modules/inspections/routes.js';
+import { createEvidenceRouter } from './modules/evidence/routes.js';
+import { createEvidenceStorage } from './infrastructure/storage.js';
 
 const HealthQuerySchema = z.object({}).strict();
 
-export function createApp({ getHealth, logger, pool, env }) {
+export function createApp({ getHealth, logger, pool, env, storage }) {
   const app = express();
   app.disable('x-powered-by');
   app.use(helmet());
@@ -31,8 +35,12 @@ export function createApp({ getHealth, logger, pool, env }) {
   });
 
   if (pool && env) {
-    app.use('/api/v1', createOriginGuard(env), express.json({ limit: '32kb' }));
+    app.use('/api/v1', createOriginGuard(env));
     const requireAuth = createRequireAuth(pool);
+    // Checklist payloads have a bounded but larger size than M1 forms.
+    app.use('/api/v1/templates', express.json({ limit: '128kb' }), createTemplatesRouter({ pool, requireAuth }));
+    app.use('/api/v1/inspections', express.json({ limit: '128kb' }), createEvidenceRouter({ pool, requireAuth, logger, storage:storage ?? createEvidenceStorage(env) }), createInspectionsRouter({ pool, requireAuth }));
+    app.use('/api/v1', express.json({ limit: '32kb' }));
     app.use('/api/v1/auth', createAuthRouter({ pool, env, requireAuth }));
     app.use('/api/v1/users', createUsersRouter({ pool, requireAuth }));
     app.use('/api/v1/assets', createAssetsRouter({ pool, requireAuth }));

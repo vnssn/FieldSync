@@ -3,6 +3,7 @@ import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { z } from 'zod';
+import { offlineShell } from './offline-shell.js';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const PortsSchema = z.object({
@@ -14,7 +15,7 @@ export default defineConfig(({ mode }) => {
   const ports = PortsSchema.parse({ ...loadEnv(mode, root, ''), ...process.env });
   return {
     envDir: root,
-    plugins: [react(), tailwindcss()],
+    plugins: [react(), tailwindcss(), offlineShell()],
     resolve: { preserveSymlinks: true },
     server: {
       host: '127.0.0.1',

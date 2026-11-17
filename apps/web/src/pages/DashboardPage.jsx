@@ -17,8 +17,10 @@ export function DashboardPage() {
       {[['All assets', assets.length], ['Active', assets.filter((a) => a.status === 'active').length], ['Archived', assets.filter((a) => a.status === 'archived').length]].map(([label, count]) =>
         <div key={label} className="panel"><p className="text-sm text-stone-500">{label}</p><p className="mt-4 text-4xl font-semibold text-[#203c33]">{count}</p></div>)}
     </div></QueryState>
-    <div className="panel mt-8"><p className="eyebrow">Keep things moving</p><h2 className="mt-3 text-xl font-semibold text-[#203c33]">A reliable record for every asset.</h2>
-      <p className="mb-6 mt-3 max-w-xl text-sm leading-6 text-stone-500">Find equipment by code or location, review its history, and keep your directory up to date.</p>
-      <Link className="button-primary inline-flex" to="/assets">Open asset directory</Link></div>
+    <div className="panel mt-8"><p className="eyebrow">Keep things moving</p><h2 className="mt-3 text-xl font-semibold text-[#203c33]">A reliable record for every inspection.</h2>
+      <p className="mb-6 mt-3 max-w-xl text-sm leading-6 text-stone-500">{user.role === 'admin' ? 'Assign checklists to your workers and review their submitted reports.' : 'Complete checklists and save your progress on this device. Reports synchronize when you reconnect.'}</p>
+      <div className="flex flex-wrap gap-3"><Link className="button-primary inline-flex" to="/inspections">Open inspections</Link>
+        {user.role === 'admin' && <Link className="button-secondary" to="/inspections?status=submitted">Review submitted reports</Link>}
+        <Link className="button-secondary" to="/assets">Asset directory</Link></div></div>
   </>;
 }

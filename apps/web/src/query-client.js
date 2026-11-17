@@ -1,7 +1,8 @@
 import { QueryClient, QueryCache, MutationCache } from '@tanstack/react-query';
+import { expireSession } from './offline/session.js';
 
 function handleSessionFailure(error) {
-  if (error.status === 401) queryClient.setQueryData(['session'], null);
+  if (error.status === 401) expireSession();
 }
 
 export const queryClient = new QueryClient({

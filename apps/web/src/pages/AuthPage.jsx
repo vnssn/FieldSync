@@ -5,11 +5,11 @@ import { useAuth } from '../auth.jsx';
 import { ErrorNotice, Field, formErrors } from '../components/ui.jsx';
 
 export function AuthPage({ register = false }) {
-  const { session, authenticate } = useAuth();
+  const { session, expired, authenticate } = useAuth();
   const [error, setError] = useState(null);
   const [errors, setErrors] = useState({});
   const [pending, setPending] = useState(false);
-  if (session.data) return <Navigate to="/" replace />;
+  if (session.data && !expired) return <Navigate to="/" replace />;
   async function submit(event) {
     event.preventDefault(); setError(null);
     const input = Object.fromEntries(new FormData(event.currentTarget));

@@ -7,6 +7,9 @@ import { AssetsPage } from './pages/AssetsPage.jsx';
 import { AssetDetailPage } from './pages/AssetDetailPage.jsx';
 import { TeamPage } from './pages/TeamPage.jsx';
 import { SystemStatusPage } from './pages/SystemStatusPage.jsx';
+import { TemplatesPage } from './pages/TemplatesPage.jsx';
+import { InspectionsPage } from './pages/InspectionsPage.jsx';
+import { InspectionDetailPage } from './pages/InspectionDetailPage.jsx';
 
 export function App() {
   return <Routes>
@@ -16,8 +19,10 @@ export function App() {
       <Route index element={<DashboardPage />} />
       <Route path="assets" element={<AssetsPage />} />
       <Route path="assets/:id" element={<AssetDetailPage />} />
+      <Route path="inspections" element={<InspectionsPage />} />
+      <Route path="inspections/:id" element={<InspectionDetailPage />} />
       <Route path="status" element={<SystemStatusPage />} />
-      <Route element={<RequireAdmin />}><Route path="team" element={<TeamPage />} /></Route>
+      <Route element={<RequireAdmin />}><Route path="team" element={<TeamPage />} /><Route path="templates" element={<TemplatesPage />} /></Route>
       <Route path="*" element={<div className="panel"><h1 className="text-2xl font-semibold">Page not found</h1><Link className="mt-4 inline-block underline" to="/">Return to dashboard</Link></div>} />
     </Route></Route>
   </Routes>;

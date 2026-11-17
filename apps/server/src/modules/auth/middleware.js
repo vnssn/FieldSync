@@ -20,7 +20,7 @@ export function createRequireAuth(pool) {
 export function requireRole(role) {
   return function roleGuard(request, _response, next) {
     if (!request.auth) throw new HttpError(401, 'UNAUTHENTICATED', 'Sign in to continue.');
-    if (request.auth.user.role !== role) throw new HttpError(403, 'FORBIDDEN', 'Administrator access is required.');
+    if (request.auth.user.role !== role) throw new HttpError(403, 'FORBIDDEN', role === 'admin' ? 'Administrator access is required.' : 'Worker access is required.');
     next();
   };
 }

@@ -14,7 +14,7 @@ The accepted simplifications are:
 - No ZIP recovery exports.
 - No microservices, Kubernetes, chatbot, or AI-centered product redesign.
 
-M0 and M1 are complete. M0 provides infrastructure and a live status page. M1 adds organization registration, authentication, tenant isolation, admin worker provisioning, and an asset directory with version-checked edits and transactional audit history. Inspection storage, offline saving, synchronization, job workers, and AI remain unimplemented. Never present planned behavior as implemented.
+M0-M4 are implemented and verified. M0 provides infrastructure and a live status page. M1 adds sessions, tenant isolation, teams and assets. M2 adds templates, assignments, checklist execution, human-written reports, admin review, historical snapshots, audits and mutation receipts. M3 adds durable local checklists, an ordered outbox, automatic replay and explicit conflict merges. M4 adds durable local photo/audio blobs, private staging uploads, immutable verified evidence, verification-gated submission, and PostgreSQL-backed BullMQ processing/cleanup/report archives. Human-reviewed AI and final hardening remain M5. Never present planned behavior as implemented.
 
 ## Non-negotiable invariants
 
@@ -83,9 +83,12 @@ M0 and M1 are complete. M0 provides infrastructure and a live status page. M1 ad
       src/query-client.js
       src/components/
       src/pages/
+      src/offline/
       src/main.jsx
       src/styles.css
       vite.config.js
+      offline-shell.js
+      build.js
     apps/server/
       src/app.js
       src/server.js
@@ -95,25 +98,39 @@ M0 and M1 are complete. M0 provides infrastructure and a live status page. M1 ad
       src/modules/auth/
       src/modules/users/
       src/modules/assets/
+      src/modules/templates/
+      src/modules/inspections/
+      src/modules/evidence/
+      src/modules/jobs/
+      src/worker.js
       src/http/
       migrations/001_init_auth.js
       migrations/002_init_assets.js
+      migrations/003_init_inspections.js
+      migrations/004_init_evidence_jobs.js
       scripts/migrate.js
     packages/contracts/src/
       constants.js
       health.js
       auth.js
       assets.js
+      inspections.js
+      offline.js
+      evidence.js
       index.js
     scripts/
       infra.js
       setup-storage.js
       check-environment.js
+      verify-m3-browser.js
+      verify-m4-browser.js
     tests/
     docker-compose.yml
     .env.example
     CONTEXT.md
     IMPLEMENTATION.md
+    EGM.md
+    INTERVIEW.md
 
 Add future feature modules when their milestone begins, rather than creating empty architectures.
 
@@ -121,7 +138,7 @@ Add future feature modules when their milestone begins, rather than creating emp
 
 HTTP routes validate requests and call business services. Services enforce permissions, state transitions and transaction boundaries. Repositories own raw parameterized SQL. Worker handlers reuse services where appropriate.
 
-React's worker editor will read local working copies through Dexie. TanStack Query is for online queries and polling; it must not become a competing draft store.
+React's worker editor reads local working copies through Dexie. TanStack Query is for online queries and polling; it must not become a competing draft store.
 
 Use named exports, small focused modules, descriptive names and brief comments explaining invariants. Use database constraints alongside application checks. Return stable error codes and request IDs. Redact secrets and evidence from logs.
 
@@ -161,11 +178,57 @@ Health probes SELECT a parameterized integer from PostgreSQL and authenticate/PI
 - Asset creation and every metadata/status update write their audit event in the same transaction. Status changes use archived/restored events; other edits use updated. History is chronological and contains actor identity and field-level before/after values. Detail reads use a consistent read-only transaction.
 - GET /assets defaults to status=active, supports active/archived/all and literal case-insensitive q search across code/name/category/location. Search wildcards are escaped and all request values are SQL parameters.
 - Browser routes: /login, /register, / (dashboard), /assets, /assets/:id, /team (admin), /status. The shell shows user/organization/role, logout and the organization ID needed for sign-in. Account switches discard prior account query data and remount views; the active session query remains subscribed.
-- M1 is an online workflow. Inspection aggregate mutation receipts, Dexie and offline behavior remain in M2/M3.
+- M1 assets/team administration is an online workflow. M2 provides mutation receipts; M3 reuses inspection endpoints for offline checklist replay.
 - tests/m1-auth-assets.test.js uses a random isolated PostgreSQL schema, the real migrations and an ephemeral HTTP listener; its after hook closes the listener/pools and drops only that generated schema. PostgreSQL must be available, with permission to create/drop test schemas. Never truncate application tables for tests.
+
+## M2 online templates, inspections and review contract
+
+- Templates are admin-managed, versioned ordered checklists with 1-50 UUID-addressed items, a name and instructions. Updates include baseVersion and replace the checklist explicitly. Archiving prevents new assignments. Existing inspections retain their frozen template and asset snapshots.
+- Admins assign an active asset and active template to a worker in their organization. Every reference uses organization_id in SQL and composite foreign keys. Tenant and actor IDs come only from request.auth; assignment cannot provision or elevate a user.
+- Workers list/read only their own assignments; admins list/read all organization inspections. Only the currently assigned worker can save checklist content or submit a report. Admins control assignments, cancellation and review, and cannot edit worker content.
+- Each answer has an itemId, pass/fail/not_applicable (or null in a draft), and notes. Drafts may be incomplete. Submission requires an outcome for every frozen checklist item and a nonempty note for each failure. The report narrative is human editable; failed-check notes are the current findings representation. M4 supplies evidence; there is no separate findings table.
+- Editable states are assigned, draft and changes_requested. Saving enters draft; submission enters submitted. Admins request changes with a required note or approve a submitted report. Reassignment is allowed only in editable states and retains saved answers. Approved/cancelled inspections are read-only. Versioned review and cancellation use the same locking/audit rules as worker saves.
+- Every M2 write carries mutationId; updates also carry numeric baseVersion. The server locks the target with SELECT FOR UPDATE and performs a conditional version increment. Stale requests return 409 VERSION_CONFLICT. Failed/no-op requests never increment the aggregate or append a revision/audit.
+- The aggregate update, inspection revision, field-level audit event and successful receipt commit together. Template updates also have atomic audits/receipts. Revisions and audit records are append-only through application code, and historical report views use stored snapshots.
+- Receipt keys are unique to organization/user/mutationId. A transaction-scoped advisory lock serializes just that receipt key. The normalized request hash includes the operation and target. Identical replays return the recorded success or expected domain error; changed requests return 409 MUTATION_ID_REUSED. Current authorization runs before replay, and replay runs before workflow/version checks. Unexpected database/transaction failures roll back the receipt and permit retry.
+- M2 requests/responses use packages/contracts/src/inspections.js. Templates/inspections allow JSON bodies up to 128 KiB; existing M1 routes keep their 32 KiB limit. Object schemas remain strict. M2 adds no dependencies, TypeScript, services or automatic startup migrations.
+- Browser routes are /templates (admin), /inspections and /inspections/:id. Admins can filter submitted reports for review. Report printing uses escaped React text and the saved snapshot; historical report selection disables current review/edit actions.
+- Admin template/assignment/review forms remain online and retain an immutable request for unconfirmed retries. M3 replaces the worker's online editor with durable local copies, replay and three-way merging; server acknowledgment remains distinct from device saving.
+- npm test runs test files sequentially because node-pg-migrate uses a database-wide migration lock; concurrency tests within suites still issue simultaneous requests. tests/m2-inspections.test.js uses its own random PostgreSQL schema and ephemeral HTTP listener, real migrations/transactions, and finally cleanup. No test truncates application tables.
+
+## M3 offline checklist and synchronization contract
+
+- Dexie version 1 opens `fieldsync:<organizationId>:<userId>`. `records` and `workingCopies` use inspection IDs; `outbox` uses an increasing sequence, unique mutationId, and inspection/status indexes. M4 adds version 2's file metadata/Blob stores. Every row includes both owner IDs and uses shared offline Zod schemas. Future schema changes must be additive; logout never deletes retained work.
+- Worker list/detail pages use cached assignments and working copies. Each edit atomically commits raw content and an outbox intent; only unattempted pending saves coalesce. Submission is a separate ordered intent and pauses editing until acknowledgment or conflict resolution. Database failures retain the React input buffer and show a retry action.
+- Before network dispatch, freeze attempted status, mutationId, normalized body, base snapshot and baseVersion in IndexedDB. Retry uncertain outcomes unchanged. Rebase only unattempted requests onto the preceding acknowledgment, and preserve newer local generations when older requests succeed. Acknowledgment updates the copy/cache/outbox atomically.
+- Reuse `GET /inspections?status=all`, detail, `PATCH /inspections/:id` and `POST /inspections/:id/submit`; M3 needs no server migration or batch endpoint. List pulls cache snapshots; details cache history. Missing/reassigned records and pending edits remain retained/read-only. Pulls respect editor locks and cannot silently replace a visible draft's base.
+- Web Locks serialize one workspace drainer and one editor per inspection. A separate origin session lock serializes `/auth/me` checks/replay with cookie-changing login/logout. Verify organization/user/worker identity before dispatch and stop on account changes. Dexie live queries share committed state across tabs.
+- Reconnect, focus, a 15-second interval, an 800-ms edit debounce and Sync now trigger replay. Conflict/blocked heads pause only their inspection. HTTP 401 pauses for sign-in; revoked access/closed workflow keeps the copy and queue. A restored assignment can be explicitly reviewed and merged.
+- Conflicts retain original base, latest local content and fetched remote. Compare answer outcomes, notes and report text independently; require explicit choices for overlaps. Recheck the remote version and local generation before confirming; queue a new mutationId/current baseVersion. Assignment, approval and workflow fields always come from the server.
+- Cache only validated public session identity in localStorage, without credentials or tokens. Offline reopening uses its own database. Expiration preserves access to local work and pauses replay. Logout removes active identity immediately, broadcasts across tabs, and records pending server logout when disconnected; finish it before another login.
+- The shell shows Online, Offline, Syncing or Conflict plus pending/review counts. Production `sw.js` precaches HTML and hashed static assets only, excluding API/auth responses. Shell upgrades never delete IndexedDB. `apps/web/build.js` sets production NODE_ENV before loading Vite so the shared development .env cannot omit registration or include React development code.
+- Offline reopening requires a previously cached production build and a browser supporting IndexedDB, service workers and Web Locks on HTTPS or loopback. Dev mode does not install the shell cache. Asset/admin pages remain online. M4 extends the same worker workspace with file blobs and evidence replay.
+- `npm test` includes core sync transitions and real PostgreSQL replay/conflict tests. `npm run test:m3:browser` runs built assets and the API on one temporary origin with real IndexedDB and an isolated PostgreSQL schema. It uses `.local/qa/node_modules/playwright/index.mjs` or an explicit `FIELDSYNC_PLAYWRIGHT_PATH`; no dependency was added. Its browser/profile/listener/pools/schema are cleaned up.
+
+## M4 evidence and background-processing contract
+
+- Migration 004 adds `evidence`, `background_jobs` and inspection evidence snapshots. Evidence references organization/inspection/creator through composite FKs; a job's evidence FK includes organization, inspection and evidence ID together. SQL checks enforce tenant-prefixed staging/verified keys.
+- Shared evidence contracts accept JPEG/PNG/WebP photos up to 10 MiB and MP3/WAV/Ogg/WebM audio up to 25 MiB, with strict filenames, sizes, MIME and SHA-256. At most 50 files belong to an inspection. Local queued bytes are limited to 200 MiB; quota failures retain the selected file for retry.
+- Dexie version 2 adds `files: 'id,inspectionId'` and `blobs: 'id'`; version 1 stores/rows survive. Hash outside IndexedDB transactions, then commit one Blob, owned metadata and an attach intent together. Never store repeated base64 bytes in outbox/snapshots. Attach/remove share aggregate versions and ordered save/submit replay. Acknowledgment clears local bytes atomically; merge confirmation also clears blobs when remote membership already satisfies the intent.
+- Reserve through `POST /inspections/:id/evidence/reserve`, obtain a descriptor through `POST /evidence/:evidenceId/upload`, POST directly to MinIO, then attach through `POST /evidence`. Reserve uses its own stable mutationId; attachment retries keep their attempted membership mutationId/body/baseVersion immutable. Expired reservations renew transport on a new staging-key generation. Old credentials/cleanup jobs address only their old key.
+- Staging reservation TTL is twenty minutes; the signed POST lasts at most ten minutes and constrains exact key, MIME, hash metadata and file length. Verify actual byte length, magic signature and SHA-256; promote the checked buffer to a fresh server-controlled immutable key. No storage call occurs inside an inspection SQL transaction. API downloads recheck current tenant/assignment and reject removed/failed evidence.
+- Attachment/removal atomically updates membership, inspection version, revision, audit, receipt and SQL job intent. Cleanup after rollback deletes only an unreferenced promoted candidate; retain staging for retry. Removal deletes bytes after commit and schedules durable cleanup. Submitted/approved/cancelled membership is read-only; changes_requested allows revision by the assigned worker. Historical reports retain metadata for removed files, whose bytes are deleted.
+- Submission/approval require every attached file's processing status to be ready. `EVIDENCE_PROCESSING` and failed-evidence prerequisites are checked before a new receipt is written; existing successful receipts still replay after workflow advances. The client defers pending verification without changing the attempted submission and retries on its normal wake-ups. Failed evidence retains blocked work for explicit review/removal. Processing status never changes inspection business version.
+- `npm run worker` starts a separate foreground BullMQ process using the API's .env/bucket/QUEUE_PREFIX. PostgreSQL `background_jobs` is both required-work outbox and authoritative outcome; Redis is scheduling transport. Handlers support verification, staging/removal cleanup and deterministic report archives. Reports read the saved source revision, validate tenant/inspection/version and escape human text; AI and generated PDFs remain outside M4.
+- Five durable attempts use exponential delays. Sixty-second leases heartbeat every fifteen seconds; completion/failure writes require the current lease token. Five-second reconciliation republishes due/lost work and settles exhausted crash leases plus failed evidence status. Queue errors are handled; bounded publisher retries preserve SQL work during Redis outages. Minute sweeps reap objects older than one hour only if no live staging/attached reference remains. A deployment must own its bucket/schema; verification uses isolated buckets.
+- MinIO CORS matches APP_ORIGIN; S3_PUBLIC_ENDPOINT must be reachable by the browser. M4 browser verification uses that local APP_ORIGIN port for real direct uploads and fails safely if it is occupied. Both browser harnesses use existing Playwright, temporary profiles/listeners/schemas and finally cleanup; M4 also removes its private bucket/Redis queue. No development process is stopped or left running.
+
+## Deployment gate
+
+Before creating, linking, or deploying any backend service on Render, stop and ask the user so they can switch their active Render account. This gate is an explicit user requirement.
 
 ## Verification and change discipline
 
 Run relevant tests, build the web client, and record actual live verification in IMPLEMENTATION.md. Never mark a live infrastructure check passed based on code inspection, mocks, or an image's published listing.
 
-Do not proceed into M2-M5 unless requested. Keep the checklist accurate when an environment blocker prevents a required check. Never leave temporary test servers or development servers running after verification.
+Do not proceed into M5 unless requested. Keep the checklist accurate when an environment blocker prevents a required check. Close temporary verification servers; preserve user-started development processes.

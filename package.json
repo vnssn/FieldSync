@@ -15,12 +15,18 @@
   "scripts": {
     "db:migrate": "npm run db:migrate --workspace=@fieldsync/server",
     "test:m1": "node --test tests/m1-auth-assets.test.js",
+    "test:m2": "node --test tests/m2-inspections.test.js",
+    "test:m3": "node --test --test-concurrency=1 tests/m3-*.test.js",
+    "test:m3:browser": "node scripts/verify-m3-browser.js",
+    "test:m4": "node --test --test-concurrency=1 tests/m4-*.test.js",
+    "test:m4:browser": "node scripts/verify-m4-browser.js",
+    "worker": "node apps/server/src/worker.js",
     "dev": "concurrently --kill-others --names api,web --prefix-colors cyan,green \"npm run dev --workspace=@fieldsync/server\" \"npm run dev --workspace=@fieldsync/web\"",
     "infra:up": "node scripts/infra.js up",
     "infra:down": "node scripts/infra.js down",
     "infra:setup": "node scripts/setup-storage.js",
     "check:env": "node scripts/check-environment.js",
-    "test": "node --test tests/*.test.js",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "build": "npm run build --workspace=@fieldsync/web"
   },
   "devDependencies": {
