@@ -13,7 +13,7 @@ For a coherent recovery point, briefly pause API mutations and worker processing
 - Evidence inventory: `organization_id`, `inspection_id`, `id`, `object_key`, `mime_type`, `size`, `sha256` for `status='attached'`.
 - Configuration names and secret-manager references; never put passwords, session tokens or provider keys in the manifest.
 
-Preserve exact `org/<organization>/inspections/<inspection>/<evidence>/verified/<UUID>` keys, bytes, Content-Type and SHA-256 metadata. Use the storage provider's snapshot/replication/export that preserves keys and object headers. Do not copy its raw active data directory as if it were a portable S3 backup. Staging objects may be omitted: reservations expire and retained browser queues renew uploads. Keep object and database recovery points paired.
+Preserve exact `org/<organization>/inspections/<inspection>/<evidence>/verified/<UUID>` keys, bytes, Content-Type and SHA-256 metadata. Use the storage provider's snapshot/replication/export that preserves keys and object headers. Do not copy its raw active data directory as if it were a portable S3 backup. Staging objects may be omitted: reservations expire and retained browser queues renew uploads with fresh PUT descriptors. Keep object and database recovery points paired. Switching from MinIO to R2 requires copying existing verified objects and coordinating PostgreSQL before changing endpoints; environment changes alone do not migrate bytes. See [R2_SETUP.md](R2_SETUP.md).
 
 ## PostgreSQL commands
 

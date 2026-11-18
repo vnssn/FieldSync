@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { reserveEvidenceSchema,evidenceMutationSchema,evidenceSchema,inspectionSchema,resourceIdParamsSchema,
-  evidenceParamsSchema,archiveParamsSchema,emptyRequestSchema } from '@fieldsync/contracts';
+  evidenceParamsSchema,archiveParamsSchema,emptyRequestSchema,uploadResponseSchema } from '@fieldsync/contracts';
 import { parseRequest } from '../../http/errors.js';
 import { createEvidenceService } from './service.js';
 
@@ -12,7 +12,7 @@ export function createEvidenceRouter({ pool,storage,logger,requireAuth }) {
   router.post('/:id/evidence/reserve',async (req,res) => res.status(201).json(evidenceSchema.parse(await service.reserve(req.auth,id(req),parseRequest(reserveEvidenceSchema,req.body)))));
   router.post('/:id/evidence/:evidenceId/upload',async (req,res) => {
     const params = parseRequest(evidenceParamsSchema,req.params); parseRequest(emptyRequestSchema,req.body);
-    res.json(await service.upload(req.auth,params.id,params.evidenceId));
+    res.json(uploadResponseSchema.parse(await service.upload(req.auth,params.id,params.evidenceId)));
   });
   router.post('/:id/evidence',async (req,res) => res.json(inspectionSchema.parse(await service.attach(req.auth,id(req),parseRequest(evidenceMutationSchema,req.body)))));
   router.post('/:id/evidence/remove',async (req,res) => res.json(inspectionSchema.parse(await service.remove(req.auth,id(req),parseRequest(evidenceMutationSchema,req.body)))));

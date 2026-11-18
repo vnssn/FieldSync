@@ -4,7 +4,7 @@
 
 M0-M5 are complete and locally verified. M0 was originally verified on 2026-11-15, M1-M3 on 2026-11-16, and M4-M5 on 2026-11-17. Final M5 verification includes 110 passing automated tests, the production build, real PostgreSQL/Redis/MinIO/restore and all M3/M4/M5 browser checks. INTERVIEW.md is refreshed through M5. Code/docs/configuration changes are uncommitted; no Render account-linked action or paid AI call has occurred.
 
-The 2026-11-18 update changes the local Blueprint to three explicit Free plans and runs BullMQ inside the web service with `RUN_INLINE_WORKER=true`; verification now passes 114 tests and the production build. Free PostgreSQL expires after 30 days, idle shutdown pauses background work, and compatible external private object storage is still required. The remaining step is the user's Render account switch and explicit authorization before creating, linking, configuring or deploying services. Deployment and cloud smoke/recovery checks have not been executed.
+The 2026-11-18 update changes the local Blueprint to three explicit Free plans and runs BullMQ inside the web service with `RUN_INLINE_WORKER=true`; that update passed 114 tests and the build. The subsequent R2-compatible PUT upload update now passes **119 tests**, the production build and both M4/M5 browser suites. Free PostgreSQL expires after 30 days, idle shutdown pauses background work, and external private object storage is still required. R2 bucket/token/CORS/billing setup, existing-object migration and live verification remain user tasks. No Render/Cloudflare account-linked action or environment-setting change was made. Deployment and cloud smoke/recovery checks have not been executed.
 
 The verification results below were captured against the real local services. Verification closes its temporary listeners and preserves user-started processes; do not start background dev servers automatically. Run npm run dev in a foreground terminal only when requested.
 
@@ -91,7 +91,7 @@ Open http://localhost:5173 and register an organization. The shell exposes its o
     npm run infra:down          # Remove containers/network; KEEP volumes
     npm run check:env           # Real PostgreSQL, Redis and S3 checks
     npm run db:migrate          # Apply JavaScript PostgreSQL migrations
-    npm test                    # 114 tests; real infrastructure + pure/provider-boundary cases
+    npm test                    # 119 tests; real infrastructure + pure/provider-boundary cases
     npm run test:m1             # M1 PostgreSQL integration tests only
     npm run test:m2             # M2 PostgreSQL integration tests only
     npm run test:m3             # M3 core sync and PostgreSQL replay tests
@@ -146,6 +146,24 @@ node-pg-migrate is pinned to 7.6.1; the tested installation reports zero npm aud
 7. npm test and npm run build succeed.
 8. Source contains no .ts/.tsx/tsconfig files or TypeScript tooling.
 9. Run M3/M4/M5 browser regressions, including offline recording, explicit assistance review, analytics/mobile/cache checks; record measured local performance.
+
+## R2-compatible evidence PUT verification — 2026-11-18
+
+Replaced presigned HTML form POST uploads with raw SigV4 PUT uploads. `uploadResponseSchema` strictly validates URL protocol, PUT method, allowed Content-Type/SHA-256 headers, MIME-specific size and expiration. The API validates descriptors at its response boundary. The browser checks Blob size/type/expiry before upload, sends no application cookies, lets the browser set Content-Length, and retains files on rejection/interruption.
+
+The official `@aws-sdk/s3-request-presigner` dependency signs the actual browser endpoint, exact tenant-prefixed staging key, Content-Type, Content-Length and SHA-256 metadata, for at most ten minutes within the existing reservation. Optional AWS checksum/trailer modes are disabled for R2 compatibility. The existing server independently verifies HEAD/GET size, bounded bytes, media signature and reserved SHA-256, then writes the checked buffer to a fresh verified key with `If-None-Match: *`. Authorization, versions, receipts, job fencing/reconciliation, cleanup, generation renewal and Dexie/outbox schema remain the existing protocol. No database migration or application environment value changed.
+
+- `node --test tests/evidence-put.test.js` exited 0: five signing/contract/browser-transport cases, including a synthetic R2 endpoint with no Cloudflare requests. These verify signed headers/auto scope/expiry/public host, rejection of foreign keys/injected headers/mismatched Blobs, raw PUT/no cookies and retention on errors.
+- The initial focused `node --test tests/m4-integration.test.js` run passed all 23 cases against real MinIO/PostgreSQL/Redis. Updated integration cases reject changed keys/types/metadata/length, anonymous reads and writes from a staging URL to a verified key; conditional overwrite fails with 412. The final full run also covers a successful PUT whose response is lost, proving attachment-first replay avoids re-upload and preserves mutation IDs/Blob until acknowledgment.
+- `npm test` exited 0: **119 tests, 119 passed, zero failed/skipped/cancelled**, including all existing M0-M5/inline-worker regressions and real pg_dump/pg_restore/object/job recovery.
+- `npm run build` exited 0: **203 modules**, largest JS chunk **394.71 kB (124.35 kB gzip)**, with no individual >500 kB advisory.
+- `npm run test:m4:browser` exited 0: actual Edge/Dexie offline photo/audio reload/full restart, quota retry, raw PUT requests with type/SHA metadata and no cookies, verification-gated submission/archive, lost-response retention and merge cleanup; zero page errors.
+- `npm run test:m5:browser` exited 0: actual MediaRecorder voice quota/restart/replay/PUT, private photo evidence, human review and response-loss/newer-intent recovery, approval/archive/provenance and all analytics/mobile/cache checks; zero page errors.
+- `npm audit --omit=dev` exited 0 with **zero vulnerabilities**. Updated documentation local links resolve and `git diff --check` passes.
+
+Updated deployment/security/recovery guides, EGM/context/interview/README and added [R2_SETUP.md](./docs/R2_SETUP.md) with exact token permissions, bucket privacy, CORS, existing Render variables, endpoint/region/path-style choices, migration/rollout checks and R2 limitations. `render.yaml`, `.env.example` and local `.env` were not changed. Live R2 credentials/permissions/CORS/billing and provider behavior remain unverified; no account-linked command or deployment ran.
+
+Logs are ignored at `.local/r2-test.log`, `.local/r2-build.log`, `.local/r2-m4-test.log`, `.local/r2-m4-browser.log` and `.local/r2-m5-browser.log`. Verification closes its generated listeners/workers/browser profiles/pools and removes only its schemas/buckets/queue namespaces. Local infrastructure remains available.
 
 ## Free-tier configuration actual verification — 2026-11-18
 

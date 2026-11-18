@@ -8,9 +8,11 @@ This repository implements M0-M5: local infrastructure, sessions, tenant-isolate
 - Read [EGM.md](EGM.md) for the current modules, schema and runtime contracts.
 - Read [IMPLEMENTATION.md](IMPLEMENTATION.md) for setup, milestone status and actual verification.
 - Read [INTERVIEW.md](INTERVIEW.md) for the implementation study guide.
-- Operating guides: [deployment](docs/DEPLOYMENT.md), [security](docs/SECURITY.md), [backup/restore](docs/BACKUP_RESTORE.md).
+- Operating guides: [deployment](docs/DEPLOYMENT.md), [Cloudflare R2 setup](docs/R2_SETUP.md), [security](docs/SECURITY.md), [backup/restore](docs/BACKUP_RESTORE.md).
 
-## Quick start
+## Free local demo and quick start
+
+You can demo the complete project locally without creating Render, Cloudflare, or AI-provider accounts. Docker Compose runs PostgreSQL, Redis, and MinIO on your computer; MinIO handles private photo/audio uploads. AI is disabled by default, and no cloud deployment is required. This avoids hosting charges, though Docker Desktop and your computer still use local resources. Cloud hosting with Render/R2 is optional and has separate free-tier limits; see [deployment](docs/DEPLOYMENT.md) and [R2 setup](docs/R2_SETUP.md).
 
 Use Node.js >=22.12 and Docker Desktop with Linux containers. In PowerShell:
 
@@ -38,7 +40,7 @@ Email verification/password reset, Mailpit, maintenance tasks, generated PDFs an
 
 npm run infra:down preserves named data volumes.
 
-The 110 automated tests include real PostgreSQL/MinIO/Redis/BullMQ integration, pure offline transitions and clearly labeled local provider HTTP simulations. M5 adds 30 tests, including a real pg_dump/pg_restore plus object/job recovery exercise. All three local services must be running; credentials must permit isolated schema/bucket creation and cleanup, and the restore drill needs local Compose PostgreSQL with permission to create a disposable database. Tests close temporary listeners/pools/workers and remove only their generated targets.
+The 119 automated tests include real PostgreSQL/MinIO/Redis/BullMQ integration, pure offline transitions and clearly labeled local provider HTTP simulations. M5 adds 30 tests, including a real pg_dump/pg_restore plus object/job recovery exercise; later checks cover inline-worker lifecycle and R2-compatible PUT contracts. All three local services must be running; credentials must permit isolated schema/bucket creation and cleanup, and the restore drill needs local Compose PostgreSQL with permission to create a disposable database. Tests close temporary listeners/pools/workers and remove only their generated targets.
 
 `npm run test:m3:browser`, `npm run test:m4:browser` and `npm run test:m5:browser` exercise built assets with actual IndexedDB using existing local Playwright. Build first. M4/M5 use the configured local APP_ORIGIN port for MinIO CORS; that port must be free. Prerequisites and recorded results are in [IMPLEMENTATION.md](IMPLEMENTATION.md). `npm run test:m5` runs the M5 suite alone; `node --test tests/m5-restore.test.js` repeats the disposable recovery drill.
 

@@ -13,6 +13,7 @@ import { redisConnection } from '../../apps/server/src/infrastructure/redis.js';
 import { createApp } from '../../apps/server/src/app.js';
 import { processJob,createJobRuntime } from '../../apps/server/src/modules/jobs/worker.js';
 import { createHealthCheck } from '../../apps/server/src/modules/health/service.js';
+import { uploadBlob } from '../../apps/web/src/offline/evidence.js';
 
 export const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jKxkAAAAASUVORK5CYII=','base64');
 export const wav=Buffer.alloc(46);
@@ -60,9 +61,7 @@ export async function createFixture(prefix='m5',extra={},options={}) {
       const body=intent({ evidenceId:randomUUID(),name,mimeType,size:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex') });
       const evidence=(await fixture.send('post',`/inspections/${row.id}/evidence/reserve`,actor,body).expect(201)).body;
       const descriptor=(await fixture.send('post',`/inspections/${row.id}/evidence/${evidence.id}/upload`,actor,{}).expect(200)).body;
-      const form=new FormData(); for(const [key,value] of Object.entries(descriptor.fields)) form.append(key,value);
-      form.append('file',new Blob([bytes],{ type:mimeType }),name);
-      assert.equal((await fetch(descriptor.url,{ method:'POST',body:form,signal:AbortSignal.timeout(10000) })).status,204);
+      await uploadBlob(descriptor,new Blob([bytes],{ type:mimeType }));
       const inspection=(await fixture.send('post',`/inspections/${row.id}/evidence`,actor,intent({ evidenceId:evidence.id,baseVersion:row.version })).expect(200)).body;
       const metadata=(await pool.query('SELECT * FROM evidence WHERE organization_id=$1 AND inspection_id=$2 AND id=$3',[row.organizationId,row.id,evidence.id])).rows[0];
       if(ready) {

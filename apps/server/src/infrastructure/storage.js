@@ -1,5 +1,6 @@
 import { S3Client, HeadBucketCommand, CreateBucketCommand, HeadObjectCommand, GetObjectCommand, PutObjectCommand, DeleteObjectCommand, ListObjectsV2Command } from '@aws-sdk/client-s3';
-import { createHash, createHmac, randomUUID } from 'node:crypto';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { uploadResponseSchema, EVIDENCE_LIMITS } from '@fieldsync/contracts';
 import { HttpError } from '../http/errors.js';
@@ -14,6 +15,10 @@ export function createStorageClient(env) {
       secretAccessKey: env.S3_SECRET_ACCESS_KEY,
     },
     maxAttempts: 2,
+    // R2 does not support all AWS automatic checksum/trailer combinations.
+    // Evidence integrity is checked independently against the reserved SHA-256.
+    requestChecksumCalculation: 'WHEN_REQUIRED',
+    responseChecksumValidation: 'WHEN_REQUIRED',
   });
 }
 
@@ -70,25 +75,29 @@ export function matchesSignature(bytes, mime) {
 export function createEvidenceStorage(env, client = createStorageClient(env)) {
   const send = (command) => client.send(command, { abortSignal: AbortSignal.timeout(15000) });
   const Bucket = env.S3_BUCKET;
+  // Sign the browser endpoint directly: changing a signed URL's host invalidates it.
+  const uploadClient = createStorageClient({ ...env, S3_ENDPOINT: env.S3_PUBLIC_ENDPOINT });
+  const destroy = client.destroy.bind(client);
+  client.destroy = () => { uploadClient.destroy(); destroy(); };
   return {
     client,
-    // S3 SigV4 POST policy constrains the exact staging key, type and file length.
-    // No signing helper dependency is needed; signing secrets stay on the server.
-    presign(row) {
+    async presign(row) {
       assertEvidenceKey(row, row.staging_key, 'staging');
-      const now = new Date(), expires = new Date(Math.min(now.getTime() + 10 * 60000, row.expires_at.getTime()));
-      if (expires <= now) throw new HttpError(410, 'UPLOAD_EXPIRED', 'This staging upload expired. Queue the file again with a new ID.');
-      const date = now.toISOString().replace(/[:-]|\.\d{3}/g, ''), day = date.slice(0,8);
-      const scope = `${day}/${env.S3_REGION}/s3/aws4_request`;
-      const fields = { key: row.staging_key, 'Content-Type': row.mime_type, 'x-amz-meta-sha256': row.sha256,
-        'x-amz-algorithm': 'AWS4-HMAC-SHA256', 'x-amz-credential': `${env.S3_ACCESS_KEY_ID}/${scope}`, 'x-amz-date': date,
-        success_action_status: '204' };
-      const policy = Buffer.from(JSON.stringify({ expiration: expires.toISOString(),
-        conditions: [{ bucket: Bucket }, ...Object.entries(fields).map(([key,value]) => ({ [key]: value })), ['content-length-range', row.size, row.size]] })).toString('base64');
-      const hmac = (key, value) => createHmac('sha256', key).update(value).digest();
-      const signingKey = hmac(hmac(hmac(hmac(`AWS4${env.S3_SECRET_ACCESS_KEY}`, day), env.S3_REGION), 's3'), 'aws4_request');
-      return uploadResponseSchema.parse({ url: `${env.S3_PUBLIC_ENDPOINT.replace(/\/$/, '')}/${encodeURIComponent(Bucket)}`,
-        fields: { ...fields, policy, 'x-amz-signature': createHmac('sha256', signingKey).update(policy).digest('hex') }, expiresAt: expires.toISOString() });
+      const now = new Date(Math.floor(Date.now() / 1000) * 1000);
+      const expiresIn = Math.min(600, Math.floor((row.expires_at.getTime() - now.getTime()) / 1000));
+      if (expiresIn < 1) throw new HttpError(410, 'UPLOAD_EXPIRED', 'This staging upload expired. Queue the file again with a new ID.');
+      const headers = { 'Content-Type': row.mime_type, 'x-amz-meta-sha256': row.sha256 };
+      const url = await getSignedUrl(uploadClient, new PutObjectCommand({
+        Bucket, Key: row.staging_key, ContentType: row.mime_type,
+        ContentLength: row.size, Metadata: { sha256: row.sha256 },
+      }), {
+        expiresIn, signingDate: now,
+        // The SDK normally omits content-type and hoists x-amz-* into the query.
+        signableHeaders: new Set(['content-type', 'content-length', 'x-amz-meta-sha256']),
+        unhoistableHeaders: new Set(['x-amz-meta-sha256']),
+      });
+      return uploadResponseSchema.parse({ url, method: 'PUT', headers, size: row.size,
+        expiresAt: new Date(now.getTime() + expiresIn * 1000).toISOString() });
     },
     async read(key, expected) {
       const kind = key === expected.staging_key ? 'staging' : 'verified';

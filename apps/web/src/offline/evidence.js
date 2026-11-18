@@ -1,11 +1,15 @@
 import { evidenceSchema,uploadResponseSchema,inspectionSchema,reserveEvidenceSchema } from '@fieldsync/contracts';
 
 export async function uploadBlob(descriptor,blob,signal) {
-  const upload=uploadResponseSchema.parse(descriptor),form=new FormData();
-  for(const [key,value] of Object.entries(upload.fields)) form.append(key,value);
-  form.append('file',blob,'evidence');
+  const upload=uploadResponseSchema.parse(descriptor);
+  if (blob.size !== upload.size || (blob.type && blob.type !== upload.headers['Content-Type'])) {
+    throw new Error('The local file does not match the upload reservation. It is retained for review.');
+  }
+  if (new Date(upload.expiresAt) <= new Date()) throw new Error('The upload URL expired. The local file is retained for retry.');
   const timeout=AbortSignal.timeout(60000);
-  const response=await fetch(upload.url,{ method:'POST',body:form,credentials:'omit',signal:signal?AbortSignal.any([signal,timeout]):timeout });
+  // The browser supplies Content-Length from the Blob; scripts cannot set it.
+  const response=await fetch(upload.url,{ method:upload.method,headers:upload.headers,body:blob,credentials:'omit',
+    signal:signal?AbortSignal.any([signal,timeout]):timeout });
   if(!response.ok) throw new Error('File upload was interrupted or rejected. The local file is retained for retry.');
 }
 export async function replayEvidence({ store,request,attempt,upload=uploadBlob,active=()=>true }) {

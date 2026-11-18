@@ -67,11 +67,12 @@ async function reserve(row, { bytes = png, mimeType = 'image/png', name = 'field
   const descriptor = uploadResponseSchema.parse((await send('post', `/inspections/${row.id}/evidence/${evidence.id}/upload`, actor, {}).expect(200)).body);
   return { evidence, descriptor, bytes, body, row, actor };
 }
-async function postFile(file, fields = {}, bytes = file.bytes) {
-  const form = new FormData();
-  for (const [key, value] of Object.entries({ ...file.descriptor.fields, ...fields })) form.append(key, value);
-  form.append('file', new Blob([bytes], { type: file.body.mimeType }), 'evidence');
-  return fetch(file.descriptor.url, { method: 'POST', body: form, signal: AbortSignal.timeout(10000) });
+function stagingKey(file) {
+  return decodeURIComponent(new URL(file.descriptor.url).pathname).slice(`/${bucket}/`.length);
+}
+async function putFile(file, headers = {}, bytes = file.bytes, url = file.descriptor.url) {
+  return fetch(url, { method: 'PUT', headers: { ...file.descriptor.headers, ...headers },
+    body: new Blob([bytes], { type: file.body.mimeType }), signal: AbortSignal.timeout(10000) });
 }
 async function metadata(file) {
   return (await pool.query('SELECT * FROM evidence WHERE organization_id=$1 AND inspection_id=$2 AND id=$3',
@@ -93,7 +94,7 @@ async function jobFor(file, kind = 'verify_evidence') {
 async function runJob(job) { await processJob({ pool, storage }, { organizationId: job.organization_id, jobId: job.id }); }
 async function attach(row, { ready = true, ...options } = {}) {
   const file = await reserve(row, options);
-  assert.equal((await postFile(file)).status, 204);
+  assert.equal((await putFile(file)).status, 200);
   file.attachBody = intent({ evidenceId: file.evidence.id, baseVersion: row.version });
   file.inspection = (await send('post', `/inspections/${row.id}/evidence`, file.actor, file.attachBody).expect(200)).body;
   if (ready) await runJob(await jobFor(file));
@@ -190,14 +191,18 @@ test('M4 routes reject foreign tenants, other workers, admin writes and injected
   assert.equal((await send('get', `/inspections/${row.id}/evidence`, orgA).expect(200)).body.evidence.length, 1);
 });
 
-test('M4 real MinIO POST policies constrain keys, MIME and exact length; objects stay private', async () => {
+test('M4 real MinIO PUT signatures constrain keys, MIME, metadata and exact length; objects stay private', async () => {
   const row = await fresh(), file = await reserve(row);
   const deniedKey = `${evidencePrefix(orgB.organization.id, row.id, file.evidence.id)}/staging/${randomUUID()}`;
-  assert.equal((await postFile(file, { key: deniedKey })).status, 403);
-  assert.equal((await postFile(file, { 'Content-Type': 'image/jpeg' })).status, 403);
-  assert.ok(!(await postFile(file, {}, Buffer.concat([png, Buffer.from('x')]))).ok);
-  assert.equal((await postFile(file)).status, 204);
-  const anonymous = await fetch(`${file.descriptor.url}/${file.descriptor.fields.key}`, { signal: AbortSignal.timeout(5000) });
+  const changedKey = new URL(file.descriptor.url);
+  changedKey.pathname = `/${bucket}/${deniedKey}`;
+  assert.equal((await putFile(file, {}, png, changedKey.href)).status, 403);
+  assert.equal((await putFile(file, { 'Content-Type': 'image/jpeg' })).status, 403);
+  assert.equal((await putFile(file, { 'x-amz-meta-sha256': '0'.repeat(64) })).status, 403);
+  assert.ok(!(await putFile(file, {}, Buffer.concat([png, Buffer.from('x')]))).ok);
+  assert.equal((await putFile(file)).status, 200);
+  const anonymousUrl = new URL(file.descriptor.url); anonymousUrl.search = '';
+  const anonymous = await fetch(anonymousUrl, { signal: AbortSignal.timeout(5000) });
   assert.equal(anonymous.status, 403);
   assert.equal(await exists(deniedKey), false);
 });
@@ -210,12 +215,12 @@ test('M4 strict file validation rejects unknown fields, bad sizes, signatures, M
       intent({ evidenceId: randomUUID(), name: 'field.png', mimeType: 'image/png', size: png.length, sha256: hash(png), ...change })).expect(400);
   }
   const invalidSignature = await reserve(row, { bytes: Buffer.from('this is not an image') });
-  assert.equal((await postFile(invalidSignature)).status, 204);
+  assert.equal((await putFile(invalidSignature)).status, 200);
   const badHash = await reserve(row);
   const altered = Buffer.from(png); altered[altered.length - 1] ^= 1;
-  assert.equal((await postFile(badHash, {}, altered)).status, 204);
+  assert.equal((await putFile(badHash, {}, altered)).status, 200);
   const badMime = await reserve(row);
-  await storage.client.send(new PutObjectCommand({ Bucket: bucket, Key: badMime.descriptor.fields.key, Body: png, ContentType: 'image/jpeg' }));
+  await storage.client.send(new PutObjectCommand({ Bucket: bucket, Key: stagingKey(badMime), Body: png, ContentType: 'image/jpeg' }));
   for (const file of [invalidSignature, badHash, badMime]) {
     const response = await send('post', `/inspections/${row.id}/evidence`, workerA, intent({ evidenceId: file.evidence.id, baseVersion: row.version })).expect(400);
     assert.equal(response.body.error.code, 'INVALID_FILE');
@@ -234,6 +239,11 @@ test('M4 promotion verifies bytes and commits membership, revision, audit, recei
   assert.deepEqual(history.events.map((event) => event.eventType), ['created', 'evidence_attached']);
   assert.equal(history.revisions.length, 2);
   assert.equal((await jobFor(file)).status, 'queued');
+  const deniedVerifiedUrl = new URL(file.descriptor.url);
+  deniedVerifiedUrl.pathname = `/${bucket}/${record.object_key}`;
+  assert.equal((await putFile(file, {}, png, deniedVerifiedUrl.href)).status, 403);
+  await assert.rejects(storage.client.send(new PutObjectCommand({ Bucket: bucket, Key: record.object_key,
+    Body: png, ContentType: 'image/png', IfNoneMatch: '*' })), (error) => error.$metadata?.httpStatusCode === 412);
   const download = await send('get', `/inspections/${row.id}/evidence/${file.evidence.id}/download`, workerA).expect(200);
   assert.deepEqual(download.body, png);
   await runJob(await jobFor(file));
@@ -243,7 +253,7 @@ test('M4 promotion verifies bytes and commits membership, revision, audit, recei
 
 test('M4 duplicate concurrent attachments and lost-response retries preserve one immutable object', async () => {
   const row = await fresh(), file = await reserve(row);
-  assert.equal((await postFile(file)).status, 204);
+  assert.equal((await putFile(file)).status, 200);
   const body = intent({ evidenceId: file.evidence.id, baseVersion: 1 });
   const [first, duplicate] = await Promise.all([
     send('post', `/inspections/${row.id}/evidence`, workerA, body).expect(200),
@@ -261,7 +271,7 @@ test('M4 duplicate concurrent attachments and lost-response retries preserve one
 test('M4 audit, revision, receipt and job failures roll back membership and clean promoted candidates', async () => {
   for (const table of ['inspection_events', 'inspection_revisions', 'mutation_receipts', 'background_jobs']) {
     const row = await fresh(), file = await reserve(row);
-    assert.equal((await postFile(file)).status, 204);
+    assert.equal((await putFile(file)).status, 200);
     const body = intent({ evidenceId: file.evidence.id, baseVersion: 1 });
     await pool.query(`CREATE FUNCTION m4_reject() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected M4 write failure'; END $$`);
     await pool.query(`CREATE TRIGGER m4_reject BEFORE INSERT ON ${table} FOR EACH ROW EXECUTE FUNCTION m4_reject()`);
@@ -271,7 +281,7 @@ test('M4 audit, revision, receipt and job failures roll back membership and clea
       assert.equal((await detail(row)).inspection.version, 1);
       assert.equal((await detail(row)).revisions.length, 1);
       assert.equal((await objects(evidencePrefix(row.organizationId, row.id, file.evidence.id))).filter((key) => key.includes('/verified/')).length, 0);
-      assert.equal(await exists(file.descriptor.fields.key), true);
+      assert.equal(await exists(stagingKey(file)), true);
     } finally {
       await pool.query(`DROP TRIGGER m4_reject ON ${table}`);
       await pool.query('DROP FUNCTION m4_reject()');
@@ -329,7 +339,7 @@ test('M4 submitted, approved and cancelled inspections reject new evidence chang
     await send('post', `/inspections/${row.id}/evidence/reserve`, workerA, { ...staged.body, evidenceId: randomUUID(), mutationId: randomUUID() }).expect(409);
     await send('post', `/inspections/${row.id}/evidence/${staged.evidence.id}/upload`, workerA, {}).expect(409);
     await send('post', `/inspections/${row.id}/evidence`, workerA, intent({ evidenceId: staged.evidence.id, baseVersion: current.version })).expect(409);
-    assert.equal((await postFile(file, {}, Buffer.alloc(png.length, 1))).status, 204);
+    assert.equal((await putFile(file, {}, Buffer.alloc(png.length, 1))).status, 200);
     assert.deepEqual((await send('get', `/inspections/${row.id}/evidence/${file.evidence.id}/download`, workerA).expect(200)).body, png);
     await send('post', `/inspections/${row.id}/evidence`, workerA, file.attachBody).expect(200);
     assert.equal((await detail(row)).inspection.version, current.version);
@@ -338,37 +348,37 @@ test('M4 submitted, approved and cancelled inspections reject new evidence chang
 
 test('M4 expired staging credentials renew on a new key and old cleanup jobs cannot delete the new upload', async () => {
   const row = await fresh(), file = await reserve(row);
-  assert.equal((await postFile(file)).status, 204);
-  const old = await jobFor(file, 'cleanup_stage'), oldKey = file.descriptor.fields.key;
+  assert.equal((await putFile(file)).status, 200);
+  const old = await jobFor(file, 'cleanup_stage'), oldKey = stagingKey(file);
   await pool.query("UPDATE evidence SET expires_at=now()-interval '1 second' WHERE id=$1", [file.evidence.id]);
   const expired = await send('post', `/inspections/${row.id}/evidence`, workerA, intent({ evidenceId: file.evidence.id, baseVersion: 1 })).expect(410);
   assert.equal(expired.body.error.code, 'UPLOAD_EXPIRED');
   file.descriptor = (await send('post', `/inspections/${row.id}/evidence/${file.evidence.id}/upload`, workerA, {}).expect(200)).body;
-  assert.notEqual(file.descriptor.fields.key, oldKey);
-  assert.equal((await postFile(file)).status, 204);
+  assert.notEqual(stagingKey(file), oldKey);
+  assert.equal((await putFile(file)).status, 200);
   await pool.query('UPDATE background_jobs SET run_after=now() WHERE id=$1', [old.id]);
   await runJob(old);
-  assert.equal(await exists(oldKey), false); assert.equal(await exists(file.descriptor.fields.key), true);
+  assert.equal(await exists(oldKey), false); assert.equal(await exists(stagingKey(file)), true);
   await send('post', `/inspections/${row.id}/evidence`, workerA, intent({ evidenceId: file.evidence.id, baseVersion: 1 })).expect(200);
 });
 
 test('M4 orphan reconciliation retains live tenant objects and removes abandoned staging and rollback promotions', async () => {
   const a = await attach(await fresh()), b = await attach(await fresh(orgB, workerB), { actor: workerB });
-  const abandoned = await reserve(await fresh()); assert.equal((await postFile(abandoned)).status, 204);
+  const abandoned = await reserve(await fresh()); assert.equal((await putFile(abandoned)).status, 200);
   await pool.query("UPDATE evidence SET expires_at=now()-interval '1 second' WHERE id=$1", [abandoned.evidence.id]);
   const orphan = `${evidencePrefix(orgA.organization.id, randomUUID(), randomUUID())}/verified/${randomUUID()}`;
   await storage.client.send(new PutObjectCommand({ Bucket: bucket, Key: orphan, Body: png, ContentType: 'image/png' }));
   await storage.client.send(new PutObjectCommand({ Bucket: bucket, Key: 'org/not-a-uuid/invalid', Body: png }));
   await reconcileObjects(pool, storage, new Date(Date.now() + 5000));
   assert.equal(await exists(orphan), false);
-  assert.equal(await exists(abandoned.descriptor.fields.key), false);
+  assert.equal(await exists(stagingKey(abandoned)), false);
   assert.equal(await exists((await metadata(a)).object_key), true);
   assert.equal(await exists((await metadata(b)).object_key), true);
 });
 
 test('M4 a real MinIO cleanup denial leaves a rollback orphan that reconciliation removes safely', async () => {
   const row = await fresh(), file = await reserve(row);
-  assert.equal((await postFile(file)).status, 204);
+  assert.equal((await putFile(file)).status, 200);
   const denied = createEvidenceStorage({ ...settings, S3_SECRET_ACCESS_KEY: 'invalid-test-signing-secret' });
   const remove = storage.remove;
   await pool.query(`CREATE FUNCTION m4_reject() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'injected rollback'; END $$`);
@@ -385,7 +395,7 @@ test('M4 a real MinIO cleanup denial leaves a rollback orphan that reconciliatio
   }
   await reconcileObjects(pool, storage, new Date(Date.now() + 5000));
   assert.equal((await objects(evidencePrefix(row.organizationId, row.id, file.evidence.id))).filter((key) => key.includes('/verified/')).length, 0);
-  assert.equal(await exists(file.descriptor.fields.key), true);
+  assert.equal(await exists(stagingKey(file)), true);
 });
 
 // This transport test uses the real API and S3 uploads with the shared pure
@@ -441,8 +451,8 @@ test('M4 offline replay uploads before submission, retries interrupted uploads a
     }
   });
   const upload = async (descriptor, blob) => {
-    if (interrupted) { interrupted = false; throw new TypeError('Upload interrupted'); }
     uploads++; await uploadBlob(descriptor, blob);
+    if (interrupted) { interrupted = false; throw new TypeError('Upload interrupted after storage committed'); }
   };
   await assert.rejects(flushOutbox({ store, request, upload }), /Upload interrupted/);
   assert.equal(store.queue[0].action, 'attach'); assert.equal(store.queue[0].status, 'attempted');

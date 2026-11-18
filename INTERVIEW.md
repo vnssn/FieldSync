@@ -1,6 +1,6 @@
 # FieldSync: Interview and Project Viva Study Guide
 
-Source snapshot: M0-M5, refreshed on 2026-11-18 for the single-service Render free-tier configuration. Final verification is recorded in [IMPLEMENTATION.md](./IMPLEMENTATION.md). Read this alongside [EGM.md](./EGM.md) and [CONTEXT.md](./CONTEXT.md). Paths below are relative to the repository root; function names identify actual implementations rather than hypothetical components. Render deployment remains gated on the user's active-account switch and approval.
+Source snapshot: M0-M5, refreshed on 2026-11-18 for the single-service Render free-tier configuration and R2-compatible evidence PUT uploads. Final verification is recorded in [IMPLEMENTATION.md](./IMPLEMENTATION.md). Read this alongside [EGM.md](./EGM.md) and [CONTEXT.md](./CONTEXT.md). Paths below are relative to the repository root; function names identify actual implementations rather than hypothetical components. Render deployment remains gated on the user's active-account switch and approval.
 
 Three corrections to remember before an interview:
 
@@ -74,7 +74,7 @@ Current findings are failed-check notes and `reportText`, without a separate fin
   +------------------------------+          +-------------------------------+
   | MinIO / S3-compatible bucket |<---------| Evidence staging / verification|
   | Current setup + HeadBucket  |          | Immutable verified objects     |
-  | Direct signed POST uploads  |          +-------------------------------+
+  | Direct signed PUT uploads   |          +-------------------------------+
   +------------------------------+
 
   HTTP/SQL/storage/queue paths shown here are implemented through M5.
@@ -1027,7 +1027,7 @@ M4 is implemented in migration 004, `packages/contracts/src/evidence.js`, server
 
 - `OfflineStore.attachFile()` hashes outside the transaction, then commits one Blob, owned metadata and attach intent together. Photo/audio limits are 10/25 MiB; the queued-device budget is 200 MiB and aggregate membership is limited to 50. Quota failures retain the chosen file.
 - `replayEvidence()` first checks for a previously committed membership receipt, then reserves/uploads if needed. Reservation and attachment have separate stable IDs. Ordered save/attach/remove/submit replay advances base versions and preserves bytes through uncertain outcomes.
-- Presigned S3 SigV4 POST policies constrain staging key, MIME, hash metadata and exact file length. Reservations last twenty minutes; transport lasts at most ten. Expired transport renews on a fresh staging generation so old credentials/cleanup cannot affect the new upload.
+- Presigned S3 SigV4 PUT signatures constrain staging key, MIME, hash metadata and exact file length. Reservations last twenty minutes; transport lasts at most ten. Expired transport renews on a fresh staging generation so old credentials/cleanup cannot affect the new upload.
 - `createEvidenceStorage().promote()` checks actual size, MIME signature and SHA-256, then conditionally writes the verified buffer to a fresh server-only UUID key. It does not copy a staging object that could change after verification. Keys and cleanup agree with tenant/inspection/evidence identity.
 - Attachment/removal commits membership, version, revision, audit, receipt and required job in one SQL transaction. Rollback cleans an unreferenced candidate; removal cleans bytes after commit with jobs/reconciliation as fallback. Historical revisions keep metadata for deleted files.
 - Submitted/approved/cancelled membership is read-only. A requested revision reopens the worker workflow. Processing status is separate from business version. Submission/approval wait for ready evidence; the pre-receipt `EVIDENCE_PROCESSING` check lets a frozen queued submission retry after verification rather than permanently replaying a transient failure.
@@ -1062,7 +1062,7 @@ Free web services have no pre-deploy command or shell/one-off jobs. The build re
 
 The trade-off is delayed background work and shared memory/CPU. Render spins the free web service down after 15 idle minutes; jobs wait until an HTTP request wakes it. Free Key Value loses all state on restart, so SQL job intent and reconciliation matter. Free PostgreSQL is limited to 1 GB and expires after 30 days, with no managed backups; export before expiration and prepare a fresh demo database/restore. A workspace supports only one free database and one free Key Value instance, and its 750 monthly free web hours plus bandwidth/build allowances constrain availability without payment details.
 
-Evidence still requires separately provisioned private HTTPS S3-compatible storage with constrained POST and conditional object writes. That provider must independently be compatible, free and cardless for the full demo to cost $0. This Blueprint alone cannot host every M0-M5 feature entirely on Render's free tier or keep the database available indefinitely. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for lifecycle, secrets, release and backup details.
+Evidence uses presigned PUT uploads into separately provisioned private HTTPS S3-compatible storage, including Cloudflare R2. SigV4 binds the exact staging key, Content-Type, Content-Length and SHA-256 metadata; backend byte verification and conditional promotion remain mandatory. R2 uses its S3 API endpoint, auto region, a bucket-scoped Object Read & Write token and origin-specific PUT CORS; [R2_SETUP.md](./docs/R2_SETUP.md) documents the inputs. R2 billing/included usage is separate from Render. The Blueprint alone cannot host every M0-M5 feature entirely on Render's free tier or keep the database available indefinitely. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for lifecycle, secrets, release and backup details.
 
 ## 7. Top 25 Likely Interview & Viva Questions
 

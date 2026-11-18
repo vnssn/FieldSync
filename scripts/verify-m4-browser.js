@@ -33,6 +33,7 @@ wav.write('RIFF'); wav.writeUInt32LE(38, 4); wav.write('WAVEfmt ', 8); wav.write
 wav.writeUInt16LE(1, 20); wav.writeUInt16LE(1, 22); wav.writeUInt32LE(8000, 24); wav.writeUInt32LE(16000, 28);
 wav.writeUInt16LE(2, 32); wav.writeUInt16LE(16, 34); wav.write('data', 36); wav.writeUInt32LE(2, 40);
 let context, page, adminAPI, workerAPI, runtime, bucketCreated = false;
+const storageRequests = [];
 try {
   // Match the configured MinIO CORS origin. EADDRINUSE fails without disturbing
   // any user-started process; this temporary listener is always closed.
@@ -64,6 +65,11 @@ try {
   await runtime.worker.pause(true);
   async function launch(offline = false) {
     context = await chromium.launchPersistentContext(profile, { channel: 'msedge', headless: true, viewport: { width: 1440, height: 1000 } });
+    context.on('request', (request) => {
+      if (request.url().startsWith(`${settings.S3_PUBLIC_ENDPOINT.replace(/\/$/, '')}/${bucket}/`) && request.method() !== 'OPTIONS') {
+        storageRequests.push({ method: request.method(), headers: request.headers() });
+      }
+    });
     await context.setOffline(offline); page = context.pages()[0] ?? await context.newPage();
     page.on('pageerror', (error) => errors.push(error.message));
   }
@@ -166,12 +172,20 @@ try {
   await runtime.worker.resume(); await queueEmpty(replay.id);
   assert.equal((await current(replay.id)).status, 'submitted');
   assert.equal((await current(replay.id)).evidence.length, 2);
+  assert.ok(storageRequests.length >= 2);
+  assert.ok(storageRequests.some((request) => request.headers['content-type'] === 'image/png'));
+  assert.ok(storageRequests.some((request) => request.headers['content-type'] === 'audio/wav'));
+  for (const request of storageRequests) {
+    assert.equal(request.method, 'PUT');
+    assert.match(request.headers['x-amz-meta-sha256'], /^[a-f0-9]{64}$/);
+    assert.equal(request.headers.cookie, undefined);
+  }
   assert.equal(await page.getByRole('button', { name: 'Attach file', exact: true }).count(), 0);
   await page.getByRole('link', { name: 'Open printable archive', exact: true }).waitFor({ timeout: 30000 });
   await page.setViewportSize({ width: 390, height: 844 });
   assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
   await page.screenshot({ path: resolve(local, 'm4-evidence-mobile.png'), fullPage: true });
-  console.log('PASS: transactional blob quota rollback/retry, offline photo/audio persistence, reload/browser restart, direct MinIO uploads, verification-gated submission and BullMQ report archive.');
+  console.log('PASS: transactional blob quota rollback/retry, offline photo/audio persistence, reload/browser restart, raw PUT uploads with signed type/hash and no cookies, verification-gated submission and BullMQ report archive.');
 
   await page.setViewportSize({ width: 1440, height: 1000 }); await open(merged.id); await context.setOffline(true);
   await page.getByLabel('Evidence file', { exact: true }).setInputFiles({ name: 'retained.png', mimeType: 'image/png', buffer: png });

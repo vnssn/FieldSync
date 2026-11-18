@@ -16,7 +16,13 @@ export const evidenceSchema = evidenceSnapshotSchema.safeExtend({
   createdAt: z.iso.datetime(), expiresAt: z.iso.datetime(),
 }).strict();
 export const evidenceListSchema = z.object({ evidence: z.array(evidenceSchema) }).strict();
-export const uploadResponseSchema = z.object({ url: z.url(), fields: z.record(z.string(), z.string()), expiresAt: z.iso.datetime() }).strict();
+export const uploadResponseSchema = z.object({
+  url: z.url().refine((value) => ['http:', 'https:'].includes(new URL(value).protocol)),
+  method: z.literal('PUT'),
+  headers: z.object({ 'Content-Type': evidenceMimeSchema, 'x-amz-meta-sha256': z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
+  size: z.number().int().positive().max(EVIDENCE_LIMITS.audio),
+  expiresAt: z.iso.datetime(),
+}).strict().refine((upload) => upload.size <= EVIDENCE_LIMITS[upload.headers['Content-Type'].startsWith('image/') ? 'photo' : 'audio'], 'File exceeds its size limit.');
 export const evidenceParamsSchema = z.object({ id: z.uuid(), evidenceId: z.uuid() }).strict();
 export const jobPayloadSchema = z.object({ organizationId: z.uuid(), jobId: z.uuid() }).strict();
 export const jobSchema = z.object({
