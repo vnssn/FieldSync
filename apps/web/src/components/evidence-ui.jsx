@@ -2,6 +2,7 @@ import { useEffect,useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { evidenceListSchema,jobsResponseSchema } from '@fieldsync/contracts';
 import { useAuth } from '../auth.jsx';
+import { VoiceRecorder } from './VoiceRecorder.jsx';
 import { useOffline } from '../offline/provider.jsx';
 import { apiRequest } from '../api/client.js';
 import { ErrorNotice } from './ui.jsx';
@@ -23,7 +24,7 @@ function Preview({ file,local=false }) {
     : <audio className="mt-3 max-w-full" controls preload="none" src={url} onError={()=>setFailed(true)} />;
 }
 
-export function EvidenceEditor({ copy,disabled,execute }) {
+export function EvidenceEditor({ copy,disabled,execute,onRecordingChange }) {
   const { store,snapshot }=useOffline();
   const [selected,setSelected]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(null),[saved,setSaved]=useState(false);
   const local=snapshot.files.filter((row)=>row.inspectionId===copy.id && row.status==='queued');
@@ -34,6 +35,7 @@ export function EvidenceEditor({ copy,disabled,execute }) {
   }
   return <section className="space-y-3"><h3 className="font-semibold">Photos and audio notes</h3>
     <p className="text-sm text-stone-500">Photos: JPEG, PNG, WebP up to 10 MiB. Audio: MP3, WAV, Ogg, WebM up to 25 MiB. Files upload before submission.</p>
+    <VoiceRecorder disabled={disabled || busy} save={(file)=>execute(()=>store.attachFile(copy.id,file))} onRecordingChange={onRecordingChange} />
     <ErrorNotice error={error} />
     <label className="block text-sm">Evidence file<input aria-label="Evidence file" className="input mt-2" type="file" disabled={disabled || busy}
       accept="image/jpeg,image/png,image/webp,audio/mpeg,audio/wav,audio/ogg,audio/webm" onChange={(event)=>{ setSelected(event.target.files[0] ?? null); setSaved(false); }} /></label>

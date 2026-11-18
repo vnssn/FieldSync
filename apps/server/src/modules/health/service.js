@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 import Redis from 'ioredis';
 import { z } from 'zod';
 import { HealthResponseSchema } from '@fieldsync/contracts';
+import { redisConnection } from '../../infrastructure/redis.js';
 
 const probeResult = z.object({ rows: z.array(z.object({ ok: z.literal(1) })).length(1) });
 const pong = z.literal('PONG');
@@ -26,11 +27,9 @@ export function createHealthCheck({ pool, env, logger }) {
       }, () => logger?.warn({ dependency: 'postgres' }, 'Health check failed')),
       measureDependency(async () => {
         // A short-lived probe reconnects cleanly after Redis restarts.
-        // Long-lived BullMQ connections belong in the future jobs module.
+        // Long-lived BullMQ connections belong to the jobs runtime.
         const client = new Redis({
-          host: env.REDIS_HOST,
-          port: env.REDIS_PORT,
-          password: env.REDIS_PASSWORD,
+          ...redisConnection(env),
           lazyConnect: true,
           enableOfflineQueue: false,
           connectTimeout: 2500,

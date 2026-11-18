@@ -1,5 +1,7 @@
 export { ROLES, ASSET_STATUSES, ASSET_EVENT_TYPES, INSPECTION_STATUSES, SYNC_STATUSES, JOB_STATUSES } from './constants.js';
 export * from './evidence.js';
+export * from './ai.js';
+export * from './analytics.js';
 export { DependencyHealthSchema, HealthResponseSchema, ErrorResponseSchema } from './health.js';
 export {
   registerOrgSchema, loginSchema, createWorkerSchema, userPublicSchema, organizationSchema,

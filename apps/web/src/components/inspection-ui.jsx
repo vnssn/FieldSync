@@ -38,7 +38,7 @@ export function InspectionStatus({ status }) {
 export function AuditHistory({ events }) {
   const labels = { answers: 'Checklist', reportText: 'Summary', assignedTo: 'Assignment', worker: 'Worker',
     reviewNote: 'Review note', submittedAt: 'Submission time', approvedAt: 'Approval time', approvedBy: 'Reviewer',
-    asset: 'Asset', template: 'Template', status: 'Status', name: 'Name', description: 'Instructions', items: 'Checklist items' };
+    asset: 'Asset', template: 'Template', status: 'Status', name: 'Name', description: 'Instructions', items: 'Checklist items', aiSources:'Reviewed assistance' };
   return <section className="panel mt-6 print-hidden"><h2 className="mb-4 text-xl font-semibold">Activity history</h2>
     <ol className="space-y-4">{events.map((event) => <li key={event.id} className="border-b border-stone-100 pb-4 last:border-0">
       <p className="text-sm"><strong className="capitalize">{event.eventType.replaceAll('_', ' ')}</strong> by {event.actorName} · Version {event.version}</p>
@@ -63,6 +63,8 @@ export function InspectionReport({ inspection }) {
     {inspection.reportText && <div className="mt-6"><h3 className="font-semibold">Inspector summary</h3><p className="mt-2 whitespace-pre-wrap text-sm">{inspection.reportText}</p></div>}
     {!!inspection.evidence?.length && <div className="mt-6"><h3 className="font-semibold">Evidence</h3><ul className="mt-2 text-sm">{inspection.evidence.map((file)=><li key={file.id}>{file.name} · {file.mimeType} · {file.size} bytes</li>)}</ul></div>}
     {inspection.reviewNote && <div className="mt-6"><h3 className="font-semibold">Admin review</h3><p className="mt-2 whitespace-pre-wrap text-sm">{inspection.reviewNote}</p></div>}
+    {!!inspection.aiSources?.length && <div className="mt-6"><h3 className="font-semibold">Reviewed assistance provenance</h3><ul className="mt-2 text-xs text-stone-500 space-y-1">
+      {inspection.aiSources.map((source)=><li key={source.artifactId}>{source.kind} · {source.mode==='fallback'?'Manual fallback':source.model} · source v{source.sourceVersion} · human-reviewed at v{source.appliedVersion}</li>)}</ul></div>}
     {inspection.submittedAt && <p className="mt-6 text-xs text-stone-500">Submitted: {new Date(inspection.submittedAt).toLocaleString()}</p>}
     {inspection.approvedAt && <p className="mt-2 text-xs text-stone-500">Approved: {new Date(inspection.approvedAt).toLocaleString()}</p>}
   </section>;

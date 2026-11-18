@@ -2,7 +2,9 @@
 
 ## Current status
 
-M0 is complete, originally verified on 2026-11-15. M1-M3 are complete, originally verified on 2026-11-16. M4 is complete, verified on 2026-11-17 with M0-M3 regression checks. M5 has not started.
+M0-M5 are complete and locally verified. M0 was originally verified on 2026-11-15, M1-M3 on 2026-11-16, and M4-M5 on 2026-11-17. Final M5 verification includes 110 passing automated tests, the production build, real PostgreSQL/Redis/MinIO/restore and all M3/M4/M5 browser checks. INTERVIEW.md is refreshed through M5. Code/docs/configuration changes are uncommitted; no Render account-linked action or paid AI call has occurred.
+
+The remaining step is the user's Render account switch and explicit authorization before creating, linking, configuring or deploying services. The local Blueprint/guides are ready; deployment and cloud smoke/recovery checks have not been executed.
 
 The verification results below were captured against the real local services. Verification closes its temporary listeners and preserves user-started processes; do not start background dev servers automatically. Run npm run dev in a foreground terminal only when requested.
 
@@ -54,13 +56,13 @@ The verification results below were captured against the real local services. Ve
 - [x] Tests for interrupted uploads, duplicate delivery and worker crashes.
 
 ### M5 — Human-reviewed AI and final hardening
-- [ ] Asynchronous image defect suggestions.
-- [ ] Offline recording, transcription and reviewed voice-to-findings.
-- [ ] Report narratives tied to source versions and manager review.
-- [ ] Provider failures leave manual inspection workflows operational.
-- [ ] Keep original model output, provenance and confirmed human data separate.
-- [ ] Inspection analytics, security review, restore exercise and deployment guide.
-- [ ] Real-browser end-to-end checks and measured performance evidence.
+- [x] Asynchronous image observation suggestions with explicit human review.
+- [x] Offline recording, optional transcription and reviewed voice-to-findings.
+- [x] Report narratives tied to source versions and manager review.
+- [x] Missing/failed providers leave manual inspection workflows operational.
+- [x] Keep original model output, provenance and confirmed human data separate.
+- [x] Inspection/asset analytics, security review, real restore exercise and local deployment guide/configuration.
+- [x] Real-browser end-to-end checks and measured local performance evidence.
 
 Excluded: email verification/password resets, Mailpit, maintenance_tasks, ZIP recovery export, microservices and Kubernetes.
 
@@ -89,14 +91,16 @@ Open http://localhost:5173 and register an organization. The shell exposes its o
     npm run infra:down          # Remove containers/network; KEEP volumes
     npm run check:env           # Real PostgreSQL, Redis and S3 checks
     npm run db:migrate          # Apply JavaScript PostgreSQL migrations
-    npm test                    # 80 tests, including 57 PostgreSQL integration cases
+    npm test                    # 110 tests; real infrastructure + pure/provider-boundary cases
     npm run test:m1             # M1 PostgreSQL integration tests only
     npm run test:m2             # M2 PostgreSQL integration tests only
     npm run test:m3             # M3 core sync and PostgreSQL replay tests
     npm run test:m3:browser     # Built client, real IndexedDB/PostgreSQL; local Playwright
     npm run test:m4             # Real PostgreSQL/MinIO/Redis/BullMQ integration cases
     npm run test:m4:browser     # Built client, actual Dexie blobs and direct MinIO uploads
-    npm run worker              # Evidence/cleanup/report worker; separate foreground terminal
+    npm run test:m5             # M5 integration, provider, security and restore tests
+    npm run test:m5:browser     # Voice/review/approval/analytics E2E; built client + real services
+    npm run worker              # Evidence/cleanup/report/AI worker; separate foreground terminal
     npm run build               # Production web build
     docker compose ps           # Container health/state
     docker compose logs -f      # Follow service logs
@@ -110,6 +114,8 @@ Do not use volume deletion as an ordinary reset. Password changes in .env do not
 ## Environment
 
 The root .env is loaded explicitly by server/scripts. Vite uses the root env directory but only exposes VITE_-prefixed values to browser code. The frontend makes relative /api requests and never receives database, Redis or S3 credentials.
+
+M5 accepts hosting DATABASE_URL/REDIS_URL, verified external PostgreSQL TLS through POSTGRES_SSL=true and verified Redis TLS through rediss://. Production requires HTTPS APP_ORIGIN and S3 endpoints. SERVE_WEB=true serves the production client on the API origin. AI_ENABLED=false remains the default; an optional server-only OPENAI_API_KEY enables provider calls, with labeled fallback on missing keys/failure. Limits/models/timeouts are in .env.example. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for secret inputs, storage CORS, internal Render PostgreSQL TLS limits and the mandatory account-switch gate.
 
 AI_ENABLED=false is parsed as a Boolean false, not JavaScript's truthy string value.
 
@@ -139,7 +145,46 @@ node-pg-migrate is pinned to 7.6.1; the tested installation reports zero npm aud
 6. A failed dependency produces 503/degraded, never a fabricated healthy result.
 7. npm test and npm run build succeed.
 8. Source contains no .ts/.tsx/tsconfig files or TypeScript tooling.
-9. Review the UI's loading, success, degraded and API-unavailable handling; full browser interaction checks remain in M5.
+9. Run M3/M4/M5 browser regressions, including offline recording, explicit assistance review, analytics/mobile/cache checks; record measured local performance.
+
+## M5 actual verification results — 2026-11-17
+
+Completed AI assistance, native offline voice recording, inspection/asset analytics and final local hardening using existing JavaScript/JSX/Zod dependencies. No TypeScript, dependency/lockfile change, extra Compose service, paid provider request or Render account-linked action was added. The final review fixed safe selected-evidence removal and 90-day mobile chart clipping, and updated the M1 migration rerun expectation to include 005.
+
+Migration **005_init_ai_analytics** was applied to the real development PostgreSQL database. A final `npm run db:migrate` exited 0 with no migrations to run. The database records migrations 001–005, fifteen application tables and **63 application indexes**, excluding bookkeeping. The existing sequential-filename timestamp advisories remain non-fatal. AI artifacts/reviews bind tenant, inspection, source revision, selected evidence, requester/reviewer, applied revision and job through composite FKs. Source identity/completed originals are SQL-guarded; generation never changes inspection content. Human-confirmed application commits draft/version/provenance/review/revision/audit/receipt together.
+
+`npm test` exited 0: **110 tests, 110 passed, zero failed/skipped/cancelled**, including the prior 80 M0-M4 cases and **30 M5 tests**:
+
+| Suite | Count | Evidence |
+| --- | --- | --- |
+| `tests/m5-integration.test.js` | 18 | Actual PostgreSQL/MinIO/Redis/BullMQ: tenant/aggregate FKs and access; source dedupe/budget; verified evidence; original/human separation; explicit confirmation, stale/closed results and rejection; concurrent/lost-response review; rollback of request/review/output; removed evidence/revoked access; retry/reconciliation/exhaustion/fencing; analytics scope/metrics/performance. A local provider HTTP simulation is also driven through real verified objects and queue delivery. |
+| `tests/m5-provider.test.js` | 6 | Native adapter with a real local HTTP server: structured Responses/multipart transcription shape, model/request metadata, missing-key/disabled no-call behavior, failures/refusals/incomplete/malformed/oversized output, unknown IDs, timeout and retained original transcript after extraction failure. These are contract simulations, not live model analyses. |
+| `tests/m5-security.test.js` | 5 | Actual peer auth throttling/forwarded-header denial, bounded per-actor windows, production environment validation, real hosting URL adapters and HTTP shell/API/CSP/microphone/no-store controls. Pure boundary cases coexist with real infrastructure. |
+| `tests/m5-restore.test.js` | 1 | Actual Docker pg_dump/pg_restore into a disposable database, immutable MinIO recovery into a new private bucket, byte/hash/metadata and original/review/revision/receipt/migration checks, then SQL-backed report reconciliation into a fresh Redis namespace. |
+
+Provider adapter success/failure tests use synthetic keys and an injected local HTTP boundary. No actual model observation, transcription accuracy, provider account/model access or paid request is claimed. Disabled/missing-key fallbacks invent no image observations or transcripts; report fallback uses recorded checklist data. If transcription succeeds before extraction fails, its original transcript survives with accurate fallback metadata.
+
+`npm run build` exited 0: Vite 8.3.8, **203 modules**, largest/main JS chunk **394.52 kB (124.29 kB gzip)**, CSS **24.55 kB (5.51 kB gzip)** and **1.55 kB sw.js**. Route splitting eliminates individual >500 kB advisories; the sum of all route/shared chunks is larger than the main chunk. Existing M0-M4 snapshots default missing aiSources to an empty array, and Dexie remains additive version 2.
+
+`npm run test:m3:browser` exited 0 against the M5 build. Existing checklist restart/replay, multi-tab locking/reconnect, explicit conflict/fresh-remote review, tenant/session/reassignment, quota and shell/mobile checks passed with zero page errors.
+
+`npm run test:m4:browser` exited 0. Actual Dexie v1-to-v2 upgrade, Blob quota rollback/retry, photo/audio offline reload/full browser restart, direct MinIO uploads, processing-gated submission, real BullMQ archive, lost-response retention and merge acknowledgment/blob cleanup all passed with zero page errors.
+
+`npm run test:m5:browser` exited 0 using headless Edge, actual IndexedDB/MediaRecorder, real PostgreSQL/MinIO and BullMQ. It passed explicit edited-field confirmation, untouched generation source, lost review-response retry and one version/review; preserved newer device intent with explicit merge; stale background source rejection; photo fallback/human findings and safe removal of selected evidence; real WebM recording, quota rollback/retained-capture retry, offline reload/full browser restart/replay and reviewed voice submission; manager approval/provenance/archive; workspace analytics with 7/30/90-day filters; visible 90-day mobile bars and desktop/mobile layouts; actual dependency health, shell-only cache and **zero page errors**. The newer-device-intent race uses a valid controlled IndexedDB injection after the real review commit. Provider-disabled UI coverage makes no live AI claim.
+
+Performance evidence from the final full run: **1,000 real inspection rows, 20 HTTP/SQL analytics reads, median 34.5 ms and p95 39.9 ms**. The final M5 browser dashboard navigation took **919 ms** locally. The restore fixture export was **97,070 bytes**, with dump/restore/object verification/job recovery work completed in **993 ms**. These are small local observations, not production throughput, model quality, or RPO/RTO guarantees.
+
+`npm run check:env` exited 0 with PostgreSQL, Redis and the private fieldsync-dev MinIO bucket up; AI remains disabled. `npm audit --omit=dev` exited 0 with **zero runtime dependency vulnerabilities**. The [render.yaml](./render.yaml) Blueprint passed local PyYAML/jsonschema validation against Render's public official JSON schema plus resource/reference/migration placement checks. No Render CLI/API validation or account access was used.
+
+Updated [EGM.md](./EGM.md), [CONTEXT.md](./CONTEXT.md), [README.md](./README.md), [INTERVIEW.md](./INTERVIEW.md), this checklist, and the [deployment](./docs/DEPLOYMENT.md), [security](./docs/SECURITY.md) and [backup/restore](./docs/BACKUP_RESTORE.md) guides. The deployment guide covers same-origin API/web, worker ordering, private database/queue, dedicated HTTPS storage, secret inputs, TLS limits, manual release and coherent recovery.
+
+Verification closes generated listeners/browser profiles/pools/workers and removes only its schemas/databases/private buckets/queue namespaces. User-started processes, local .env and development data are preserved. Ignored artifacts include `.local/m5-final-test.log`, `.local/m5-m3-browser.log`, `.local/m5-m4-browser.log`, `.local/m5-final-browser.log`, and reviewed `.local/m5-voice-mobile.png`, `.local/m5-analytics-mobile.png`, `.local/m5-analytics-desktop.png`.
+
+Final read-only cleanup audit found **zero** leftover test schemas, restore databases, test buckets or test Redis keys, and zero listeners on local API/web ports 3000/5173. All eight updated Markdown guides' local links resolve, `git diff --check` passes, and source inspection found no TypeScript files/tooling. The three development dependencies remain healthy after cleanup.
+
+### Exactly what remains next
+
+No additional M0-M5 local application code is required. **STOP before any Render account-linked step**: the user must switch to the intended active Render account and authorize creation/linking/configuration/deployment. After that approval, follow the deployment guide to review names/region/costs and storage policy, fill secrets, provision/link the planned services, migrate the API before worker readiness, and record actual cloud smoke and backup/recovery checks. AI provider activation/quality evaluation is optional and remains unverified; manual/fallback workflows are complete.
 
 ## M4 actual verification results — 2026-11-17
 
@@ -185,7 +230,7 @@ Implemented with the existing Dexie/React/Zod dependencies. IndexedDB databases 
 
 The browser harness lives at `scripts/verify-m3-browser.js`; it uses the existing local Playwright module at `.local/qa/node_modules/playwright/index.mjs`, or `FIELDSYNC_PLAYWRIGHT_PATH` pointing to an existing installation. Build first and keep PostgreSQL available. The generated browser profile, ephemeral HTTP listener, API contexts, pools and isolated schema are cleaned up in finally. User-started development processes are untouched. The reviewed mobile screenshot is ignored at `.local/m3-offline-mobile.png`.
 
-Offline reopening requires a cached production shell, IndexedDB/Web Locks/service-worker support, and HTTPS or loopback. Worker assignments are cached through existing M2 reads; assets/admin operations remain online. M4 now supplies evidence bytes/uploads/background jobs as recorded above; AI remains M5.
+Offline reopening requires a cached production shell, IndexedDB/Web Locks/service-worker support, and HTTPS or loopback. Worker assignments are cached through existing M2 reads; assets/admin operations remain online. M4 supplies evidence bytes/uploads/background jobs; M5 assistance/recording/analytics verification is recorded above.
 
 ## M2 actual verification results — 2026-11-16
 
@@ -223,7 +268,7 @@ All paths below are under /api/v1 and require a session. State-changing requests
 
 Browser pages: /templates (admin), /inspections and /inspections/:id. Templates support ordered items and archival; assignments choose active assets/templates and worker accounts. Workers save incomplete drafts or submit completed checks; failures require notes. Admins review saved reports and add review notes. Historical versions and printable reports use the stored snapshots. Approved/cancelled records are read-only. Unconfirmed retries preserve the attempted payload/ID; conflicts preserve form input until explicit reload/review.
 
-M3 supplies the durable browser draft store and synchronization described above; M4 extends it with evidence upload/processing. AI remains M5. The checklist uses pass/fail/not_applicable plus notes rather than a separate findings table or configurable form engine.
+M3 supplies the durable browser draft store and synchronization described above; M4 extends it with evidence upload/processing and M5 adds reviewed assistance as recorded above. The checklist uses pass/fail/not_applicable plus notes rather than a separate findings table or configurable form engine.
 
 ## M1 actual verification results — 2026-11-16
 

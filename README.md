@@ -2,11 +2,13 @@
 
 An offline-first field inspection application built as a JavaScript modular monolith.
 
-This repository implements M0-M4: local infrastructure, shared contracts, sessions, tenant-isolated teams/assets, templates, offline worker checklists, admin review, private photo/audio uploads and durable background jobs. Inspection changes have version checks, audit/revision snapshots and mutation receipts. Worker drafts/files use isolated Dexie databases, automatic replay and explicit conflict merging. Human-reviewed AI remains M5.
+This repository implements M0-M5: local infrastructure, sessions, tenant-isolated teams/assets, templates, offline checklists/voice/evidence, manager review, durable jobs, reviewed AI assistance and inspection/asset analytics. Inspection changes have version checks, audit/revision snapshots and mutation receipts. Worker drafts/files use isolated Dexie databases, automatic replay and explicit conflict merging.
 
 - Read [CONTEXT.md](CONTEXT.md) for engineering invariants and architecture.
 - Read [EGM.md](EGM.md) for the current modules, schema and runtime contracts.
 - Read [IMPLEMENTATION.md](IMPLEMENTATION.md) for setup, milestone status and actual verification.
+- Read [INTERVIEW.md](INTERVIEW.md) for the implementation study guide.
+- Operating guides: [deployment](docs/DEPLOYMENT.md), [security](docs/SECURITY.md), [backup/restore](docs/BACKUP_RESTORE.md).
 
 ## Quick start
 
@@ -21,9 +23,13 @@ Use Node.js >=22.12 and Docker Desktop with Linux containers. In PowerShell:
 
 Open http://localhost:5173 and create your organization. Use the organization ID shown in the app shell, email, and password to sign in. Admins create worker accounts from Team; share their credentials and organization ID directly. APP_ORIGIN must match the frontend origin for state-changing requests.
 
-Run `npm run worker` in a second foreground terminal for evidence verification, cleanup and printable report archives. Files upload before submission, which waits for verified evidence. MinIO CORS must match APP_ORIGIN and S3_PUBLIC_ENDPOINT must be browser-reachable.
+Run `npm run worker` in a second foreground terminal for evidence verification, cleanup, AI requests and printable report archives. Files upload before submission, which waits for verified evidence. MinIO CORS must match APP_ORIGIN and S3_PUBLIC_ENDPOINT must be browser-reachable.
 
-Everything required for M0-M4 runs locally. AI is disabled. There is no email verification, Mailpit, maintenance-task module or ZIP recovery feature.
+All M0-M5 workflows run locally. AI_ENABLED defaults to false: image/voice requests show labeled manual fallbacks and report drafts summarize recorded checks. To opt in, set AI_ENABLED=true and a server-only OPENAI_API_KEY in `.env`, then restart API/worker; models and timeout are configurable. A worker must explicitly review/edit/confirm suggestions before inspection content changes. Managers still review submitted reports. Provider outages leave manual work available.
+
+The Dashboard shows current inspection statuses, failed checks, submission timing, daily activity and up to 50 asset summaries for 7/30/90 UTC days. Admins see the organization; workers see current assignments. Record voice notes offline in a supported HTTPS/localhost browser, then attach them before leaving the page. Attached recordings use the existing durable file queue and upload on reconnect.
+
+Email verification/password reset, Mailpit, maintenance tasks, generated PDFs and ZIP recovery are outside this implementation.
 
 ## Quality checks
 
@@ -32,8 +38,12 @@ Everything required for M0-M4 runs locally. AI is disabled. There is no email ve
 
 npm run infra:down preserves named data volumes.
 
-The 80 tests include 57 PostgreSQL integration cases, including 23 M4 cases using real MinIO and Redis/BullMQ with controlled failure injection. All three local services must be running; test credentials must permit isolated schema/bucket creation and cleanup. Tests close temporary listeners/pools/workers and remove only their generated schemas, buckets and queues.
+The 110 automated tests include real PostgreSQL/MinIO/Redis/BullMQ integration, pure offline transitions and clearly labeled local provider HTTP simulations. M5 adds 30 tests, including a real pg_dump/pg_restore plus object/job recovery exercise. All three local services must be running; credentials must permit isolated schema/bucket creation and cleanup, and the restore drill needs local Compose PostgreSQL with permission to create a disposable database. Tests close temporary listeners/pools/workers and remove only their generated targets.
 
-`npm run test:m3:browser` and `npm run test:m4:browser` exercise built assets with actual IndexedDB using existing local Playwright. Build first. The M4 harness uses the configured local APP_ORIGIN port for MinIO CORS; that port must be free. Prerequisites and recorded results are in [IMPLEMENTATION.md](IMPLEMENTATION.md).
+`npm run test:m3:browser`, `npm run test:m4:browser` and `npm run test:m5:browser` exercise built assets with actual IndexedDB using existing local Playwright. Build first. M4/M5 use the configured local APP_ORIGIN port for MinIO CORS; that port must be free. Prerequisites and recorded results are in [IMPLEMENTATION.md](IMPLEMENTATION.md). `npm run test:m5` runs the M5 suite alone; `node --test tests/m5-restore.test.js` repeats the disposable recovery drill.
 
 Open assigned work online before going into the field. Worker edits are saved on this device and synchronized on reconnect, focus or interval. Conflicts retain local work for review; expired sessions pause sync until sign-in. A previously cached production shell supports offline browser reopening on HTTPS or loopback; development mode does not install a service worker. Assets and admin operations remain online.
+
+## Deployment gate
+
+[render.yaml](render.yaml) is a locally validated readiness file. **Do not create, link, configure or deploy any Render backend service until the user switches their active Render account and authorizes continuation.** Blueprint import itself can trigger an initial deployment even with automatic deploys disabled. No Render account-linked step has been performed, and local tests do not establish cloud readiness or live AI quality.

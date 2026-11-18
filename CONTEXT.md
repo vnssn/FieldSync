@@ -6,7 +6,7 @@ Read this file and IMPLEMENTATION.md before making changes. The user's latest in
 
 FieldSync is an offline-first field inspection application, implemented as a JavaScript modular monolith. Organizations manage assets and assign inspections to workers. Workers capture findings and photographs offline, then synchronize. Managers review and approve submitted reports.
 
-The three planned AI features are image defect suggestions, voice-to-findings, and report narratives. Each requires explicit human review. AI_ENABLED defaults to false, and the manual inspection workflow must work without an AI service.
+The three implemented assistance features are image observation suggestions, voice-to-findings, and report narratives. Each requires explicit human review. AI_ENABLED defaults to false; requests use labeled deterministic/manual fallbacks without a working provider, and the manual inspection workflow remains independent of AI.
 
 The accepted simplifications are:
 - No email verification or password reset flows; no Mailpit or email infrastructure.
@@ -14,7 +14,7 @@ The accepted simplifications are:
 - No ZIP recovery exports.
 - No microservices, Kubernetes, chatbot, or AI-centered product redesign.
 
-M0-M4 are implemented and verified. M0 provides infrastructure and a live status page. M1 adds sessions, tenant isolation, teams and assets. M2 adds templates, assignments, checklist execution, human-written reports, admin review, historical snapshots, audits and mutation receipts. M3 adds durable local checklists, an ordered outbox, automatic replay and explicit conflict merges. M4 adds durable local photo/audio blobs, private staging uploads, immutable verified evidence, verification-gated submission, and PostgreSQL-backed BullMQ processing/cleanup/report archives. Human-reviewed AI and final hardening remain M5. Never present planned behavior as implemented.
+M0-M5 are implemented and locally verified; M5 and the full M0-M4 regression were verified on 2026-11-17 with 110 automated tests, the build, real infrastructure/restore and all three browser harnesses passing. M0 provides infrastructure and a live status page. M1 adds sessions, tenant isolation, teams and assets. M2 adds templates, assignments, checklist execution, human-written reports, admin review, historical snapshots, audits and mutation receipts. M3 adds durable local checklists, an ordered outbox, automatic replay and explicit conflict merges. M4 adds durable local photo/audio blobs, private staging uploads, immutable verified evidence, verification-gated submission, and PostgreSQL-backed BullMQ processing/cleanup/report archives. M5 adds reviewed AI artifacts, offline voice recording, scoped analytics, HTTP/hosting hardening, a real restore exercise and local deployment guides/configuration. No Render account-linked action or paid AI call has been performed. Never present planned or cloud-unverified behavior as verified.
 
 ## Non-negotiable invariants
 
@@ -70,6 +70,9 @@ M0-M4 are implemented and verified. M0 provides infrastructure and a live status
 - Keep original AI results separate from human-confirmed findings/report text.
 - Applying suggestions is an authenticated, authorized, version-checked human action.
 - Preserve original output and provenance; reject stale report results.
+- Artifacts bind organization/inspection/source revision/evidence/requester; reviews bind organization/inspection/artifact/reviewer/applied revision through composite FKs.
+- Only the assigned worker applies confirmed fields to editable content. Admins inspect/reject suggestions and review submitted reports through the existing workflow.
+- Generation never updates inspection answers, report text or version. Applying a review commits content, provenance, revision, audit and receipt together.
 - Provider outages must not block manual inspection work.
 - Never present test fixtures or mocks as actual analysis, or predict failure accurately without suitable data.
 
@@ -102,12 +105,15 @@ M0-M4 are implemented and verified. M0 provides infrastructure and a live status
       src/modules/inspections/
       src/modules/evidence/
       src/modules/jobs/
+      src/modules/ai/
+      src/modules/analytics/
       src/worker.js
       src/http/
       migrations/001_init_auth.js
       migrations/002_init_assets.js
       migrations/003_init_inspections.js
       migrations/004_init_evidence_jobs.js
+      migrations/005_init_ai_analytics.js
       scripts/migrate.js
     packages/contracts/src/
       constants.js
@@ -117,6 +123,8 @@ M0-M4 are implemented and verified. M0 provides infrastructure and a live status
       inspections.js
       offline.js
       evidence.js
+      ai.js
+      analytics.js
       index.js
     scripts/
       infra.js
@@ -124,8 +132,13 @@ M0-M4 are implemented and verified. M0 provides infrastructure and a live status
       check-environment.js
       verify-m3-browser.js
       verify-m4-browser.js
+      verify-m5-browser.js
     tests/
+    docs/DEPLOYMENT.md
+    docs/SECURITY.md
+    docs/BACKUP_RESTORE.md
     docker-compose.yml
+    render.yaml
     .env.example
     CONTEXT.md
     IMPLEMENTATION.md
@@ -225,10 +238,24 @@ Health probes SELECT a parameterized integer from PostgreSQL and authenticate/PI
 
 ## Deployment gate
 
-Before creating, linking, or deploying any backend service on Render, stop and ask the user so they can switch their active Render account. This gate is an explicit user requirement.
+Before creating, linking, configuring, or starting deployment of any backend service on Render, stop and ask the user so they can switch their active Render account. All Render CLI/API/account-linked steps remain gated, including account-linked validation. Local configuration files and public-schema validation are allowed. Blueprint creation can trigger an initial deploy even when autoDeployTrigger is off. This gate is an explicit user requirement.
+
+## M5 assistance, analytics and hardening contract
+
+- Migration 005 adds `ai_artifacts`, `ai_reviews`, inspection `ai_sources`, six supporting indexes and `assist_inspection` job references. Source revisions, evidence, users/reviewers and applied revisions have composite tenant FKs. Artifact source identity and completed original output are guarded against SQL updates. The database now has fifteen application tables and 63 application indexes; `pgmigrations` is separate.
+- Assistance endpoints are `GET/POST /inspections/:id/ai` and `POST /inspections/:id/ai/:artifactId/review`. Authenticated workers request editable inspection assistance at their current baseVersion; image/audio requests require matching attached, ready evidence. Source/kind/evidence requests deduplicate independently of mutation IDs. A PostgreSQL per-actor hourly budget serializes across API processes.
+- The existing BullMQ runtime reads the frozen source revision, validates tenant/source/evidence ownership, and reads verified MinIO bytes before provider dispatch. Removed evidence, revoked assignment and closed inspections settle unavailable artifacts. Original output/model metadata and job completion commit in one fenced SQL transaction; exhausted crash leases settle queued artifacts as failed. Storage/SQL errors retain the five-attempt retry policy. Provider errors normally settle with a labeled fallback, not repeated paid retries.
+- The optional native-fetch OpenAI adapter uses Responses structured outputs and multipart transcription on the official host. Defaults are gpt-5-mini/gpt-transcribe, a 30-second combined timeout and a bounded response. AI_ENABLED=false or a missing key makes no external provider call. Failures/refusals/malformed outputs fall back deterministically. Image/voice fallback invents no observations/transcript; a successfully obtained transcript survives a later extraction failure with accurate metadata.
+- Artifact `sourceVersion`, provider/model/mode/fallback reason, prompt version, provider request ID, original structured output and raw output remain separate from `ai_reviews.confirmed_output`. Public responses omit raw output. Report fallback uses recorded checklist data only. There are no tools, autonomous actions, automatic defect outcomes, predictive failure claims or generated PDFs.
+- Applying `decision=apply` requires `confirmed=true`, complete inspection-owned answer IDs, worker authorization, current baseVersion and matching artifact sourceVersion. It writes a new draft/version plus reviewed provenance, revision, audit and receipt atomically; original output remains immutable. Explicit reject records only the human review without changing inspection content/version. Submitted/approved/cancelled reports cannot accept AI edits; manager approval remains the existing M2 review step.
+- Worker review requires an online, synced copy and editor lock. Uncertain responses freeze the exact in-page review request/editor for retry; read server state after reopening. `OfflineStore.acceptReview()` installs an acknowledgment only if local generation/base still match; newer device intent is retained and uses the existing explicit merge. AI does not add an offline mutation kind or Dexie schema version.
+- `VoiceRecorder` uses actual MediaRecorder in supported HTTPS/localhost browsers, captures WebM/Ogg up to five minutes, and queues the recording through M4's atomic Blob/metadata/outbox flow. Attach captured audio before leaving the page. Quota failures retain the captured file for retry; attached bytes survive offline reload/browser restart and upload before submission. Existing MP3/WAV/Ogg/WebM file attachment remains available without microphone support.
+- `GET /analytics` accepts strict 7/30/90-day and optional asset filters. Admins see the organization; workers see only current assignments and their assets. Read-only repeatable-read SQL reports current status/failed checks for inspections created in the UTC period, latest-submission duration, daily creation/latest-submission dates and up to 50 asset rows. Current asset counts include archived assets. Metrics describe recorded data, not predictions; analytics/admin operations remain online.
+- Hosting accepts DATABASE_URL/REDIS_URL, supports verified external PostgreSQL/Redis TLS, requires HTTPS origin/storage in production, and optionally serves the built web client through the API. Helmet CSP permits configured storage connections and blob media; microphone is self-only. Burst limits are 60/minute/peer for auth and 10/minute/tenant/user for AI; the durable AI budget defaults to 20/hour/actor. Route splitting keeps individual web chunks below 500 kB in the verified build.
+- [DEPLOYMENT.md](./docs/DEPLOYMENT.md), [SECURITY.md](./docs/SECURITY.md), [BACKUP_RESTORE.md](./docs/BACKUP_RESTORE.md) and [render.yaml](./render.yaml) document a same-origin API/worker, private database/queue, external private HTTPS storage, secret inputs, internal Render PostgreSQL TLS limits and coherent recovery. The restore integration uses real pg_dump/pg_restore, new MinIO targets and actual job reconciliation. No cloud deployment, continuous backup service, live model quality or production capacity is claimed.
 
 ## Verification and change discipline
 
 Run relevant tests, build the web client, and record actual live verification in IMPLEMENTATION.md. Never mark a live infrastructure check passed based on code inspection, mocks, or an image's published listing.
 
-Do not proceed into M5 unless requested. Keep the checklist accurate when an environment blocker prevents a required check. Close temporary verification servers; preserve user-started development processes.
+Keep the checklist accurate when an environment blocker prevents a required check. Close temporary verification servers; preserve user-started development processes. Work beyond the accepted M0-M5 scope requires a new request. Deployment approval is still outstanding after local M5 completion.

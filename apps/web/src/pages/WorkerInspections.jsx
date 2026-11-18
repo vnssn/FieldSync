@@ -7,6 +7,7 @@ import { mergeContent } from '../offline/state.js';
 import { ErrorNotice, PageIntro } from '../components/ui.jsx';
 import { InspectionReport, InspectionStatus, AuditHistory } from '../components/inspection-ui.jsx';
 import { EvidenceEditor,EvidencePanel } from '../components/evidence-ui.jsx';
+import { AiPanel } from '../components/ai-ui.jsx';
 
 export function WorkerInspections() {
   const { snapshot, error, online, wake } = useOffline();
@@ -84,6 +85,7 @@ function LocalEditor({ copy, queue }) {
   const [pending, setPending] = useState(0);
   const [reviewError, setReviewError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [aiBusy,setAiBusy] = useState(false),[recording,setRecording] = useState(false);
   const latest = useRef(copy.content);
   const committedGeneration = useRef(copy.generation);
   const dirty = useRef(false);
@@ -92,7 +94,23 @@ function LocalEditor({ copy, queue }) {
     // Never restore an older render over the just-committed input buffer.
     if (!dirty.current && pending === 0 && copy.generation >= committedGeneration.current) { latest.current = copy.content; setDraft(copy.content); }
   }, [copy.content, copy.generation, pending]);
-  const editable = locked && !submitting && mayEdit(copy, queue);
+  const editable = locked && !submitting && !aiBusy && mayEdit(copy, queue);
+  async function prepareReview() {
+    await writes.current;
+    const current=await store.snapshot(copy.id);
+    if (!locked || dirty.current || current.queue.some((entry)=>entry.inspectionId===copy.id)
+      || current.copy.generation!==copy.generation || current.copy.base.version!==copy.base.version) throw new Error('Sync and review your current device edits first.');
+    return { generation:current.copy.generation,baseVersion:current.copy.base.version };
+  }
+  async function acceptReview(saved,expected) {
+    const applied=await store.acceptReview(saved,expected);
+    if (applied) {
+      const current=await store.db.workingCopies.get(copy.id);
+      committedGeneration.current=current.generation; dirty.current=false;
+      latest.current=current.content; setDraft(current.content);
+    }
+    wake();
+  }
   function persist(content, action = 'save') {
     if (action === 'submit') setSubmitting(true);
     dirty.current = true; setPending((count) => count + 1); setError(null);
@@ -147,10 +165,12 @@ function LocalEditor({ copy, queue }) {
       </div>;
     })}<label className="block text-sm font-medium">Report summary<textarea aria-label="Report summary" className="input mt-2" rows={5} maxLength={10000} value={draft.reportText}
       onChange={(event) => change({ ...latest.current, reportText: event.target.value })} /></label>
-      <EvidenceEditor copy={copy} disabled={!editable || pending>0 || !!copy.conflict} execute={fileAction} />
-      <div className="flex flex-wrap gap-3"><button value="save" className="button-secondary" disabled={pending > 0}>Save draft</button><button value="submit" className="button-primary" disabled={pending > 0 || !!error || !!copy.conflict}>Submit for review</button></div>
+      <EvidenceEditor copy={copy} disabled={!editable || pending>0 || !!copy.conflict} execute={fileAction} onRecordingChange={setRecording} />
+      <div className="flex flex-wrap gap-3"><button value="save" className="button-secondary" disabled={pending > 0 || recording}>Save draft</button><button value="submit" className="button-primary" disabled={pending > 0 || recording || !!error || !!copy.conflict}>Submit for review</button></div>
     </fieldset></form>
-    {copy.conflict && <ConflictReview key={`${copy.generation}:${copy.conflict.remote.version}`} copy={copy} disabled={!locked || pending > 0 || !!error} />}
+    <AiPanel inspection={copy.base} content={draft} disabled={!locked || pending>0 || recording || dirty.current || !!error || !!copy.conflict || !!copy.blocked || submitting || queue.length>0}
+      prepareReview={prepareReview} acceptReview={acceptReview} onBusyChange={setAiBusy} />
+    {copy.conflict && <ConflictReview key={`${copy.generation}:${copy.conflict.remote.version}`} copy={copy} disabled={!locked || pending > 0 || aiBusy || !!error} />}
   </>;
 }
 
@@ -174,6 +194,7 @@ export function WorkerInspectionDetail() {
           <option key={entry.id} value={String(entry.version)}>Historical version {entry.version}</option>)}</select></label>
       {revision && <p className="mt-4 text-sm text-amber-800">Historical report · Version {revision}</p>}
       <InspectionReport inspection={shown ?? { ...copy.base, ...copy.content }} /><EvidencePanel inspection={shown ?? copy.base} /><AuditHistory events={record?.detail?.events ?? []} />
+      {!revision && !(['assigned','draft','changes_requested'].includes(copy.base.status) || queue.length>0 || copy.blocked) && <AiPanel inspection={copy.base} readOnly />}
     </>}
   </>;
 }

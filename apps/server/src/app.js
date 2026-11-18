@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import helmet from 'helmet';
 import pinoHttp from 'pino-http';
+import { resolve } from 'node:path';
 import { z } from 'zod';
 import { HealthResponseSchema, ErrorResponseSchema } from '@fieldsync/contracts';
 import { HttpError } from './http/errors.js';
@@ -14,13 +15,21 @@ import { createTemplatesRouter } from './modules/templates/routes.js';
 import { createInspectionsRouter } from './modules/inspections/routes.js';
 import { createEvidenceRouter } from './modules/evidence/routes.js';
 import { createEvidenceStorage } from './infrastructure/storage.js';
+import { createAiRouter } from './modules/ai/routes.js';
+import { createAnalyticsRouter } from './modules/analytics/routes.js';
+import { createRateLimits } from './http/rate-limit.js';
 
 const HealthQuerySchema = z.object({}).strict();
 
-export function createApp({ getHealth, logger, pool, env, storage }) {
+export function createApp({ getHealth, logger, pool, env, storage, webDirectory }) {
   const app = express();
   app.disable('x-powered-by');
-  app.use(helmet());
+  app.set('trust proxy',env?.TRUST_PROXY_HOPS ?? 0);
+  app.use(helmet({ contentSecurityPolicy:{ directives:{
+    connectSrc:["'self'",...(env ? [new URL(env.S3_PUBLIC_ENDPOINT).origin]:[])],
+    imgSrc:["'self'",'blob:','data:'],mediaSrc:["'self'",'blob:'],
+    upgradeInsecureRequests:env?.NODE_ENV==='production' ? []:null,
+  } } }));
   app.use(pinoHttp({
     logger,
     genReqId: (_request, response) => {
@@ -31,19 +40,24 @@ export function createApp({ getHealth, logger, pool, env, storage }) {
   }));
   app.use((_request, response, next) => {
     response.setHeader('Cache-Control', 'no-store');
+    response.setHeader('Permissions-Policy','microphone=(self), camera=(), geolocation=()');
     next();
   });
 
   if (pool && env) {
     app.use('/api/v1', createOriginGuard(env));
     const requireAuth = createRequireAuth(pool);
+    const limits = createRateLimits(env);
     // Checklist payloads have a bounded but larger size than M1 forms.
     app.use('/api/v1/templates', express.json({ limit: '128kb' }), createTemplatesRouter({ pool, requireAuth }));
-    app.use('/api/v1/inspections', express.json({ limit: '128kb' }), createEvidenceRouter({ pool, requireAuth, logger, storage:storage ?? createEvidenceStorage(env) }), createInspectionsRouter({ pool, requireAuth }));
+    app.use('/api/v1/inspections', express.json({ limit: '128kb' }), createAiRouter({ pool,env,requireAuth,limit:limits.ai }),
+      createEvidenceRouter({ pool, requireAuth, logger, storage:storage ?? createEvidenceStorage(env) }), createInspectionsRouter({ pool, requireAuth }));
     app.use('/api/v1', express.json({ limit: '32kb' }));
+    app.use('/api/v1/auth',(req,res,next) => req.method==='POST' && ['/login','/register-org'].includes(req.path) ? limits.auth(req,res,next):next());
     app.use('/api/v1/auth', createAuthRouter({ pool, env, requireAuth }));
     app.use('/api/v1/users', createUsersRouter({ pool, requireAuth }));
     app.use('/api/v1/assets', createAssetsRouter({ pool, requireAuth }));
+    app.use('/api/v1/analytics', createAnalyticsRouter({ pool,requireAuth }));
   }
 
   app.get('/api/v1/health', async (request, response) => {
@@ -59,6 +73,16 @@ export function createApp({ getHealth, logger, pool, env, storage }) {
     response.setHeader('Cache-Control', 'no-store');
     return response.status(result.status === 'ok' ? 200 : 503).json(result);
   });
+
+  if (webDirectory) {
+    app.use(express.static(webDirectory,{ index:false,setHeaders:(res,path) => {
+      if (path.includes(`${resolve(webDirectory,'assets')}`)) res.setHeader('Cache-Control','public, max-age=31536000, immutable');
+    } }));
+    app.get(/^\/(?!api(?:\/|$))[^.]*$/,(req,res,next) => {
+      if (!req.accepts('html')) return next();
+      res.sendFile(resolve(webDirectory,'index.html'));
+    });
+  }
 
   app.use((request, response) => {
     response.status(404).json(ErrorResponseSchema.parse({

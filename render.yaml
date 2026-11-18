@@ -1,0 +1,142 @@
+# Local deployment blueprint only. Do not import, link or apply this file until
+# the user has switched Render accounts and explicitly authorized deployment.
+# Blueprint creation starts an initial deployment even with auto-deploy off.
+services:
+  - type: web
+    name: fieldsync-api
+    runtime: node
+    region: singapore
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: "off"
+    buildCommand: npm ci --include=dev && npm run build
+    preDeployCommand: npm run db:migrate
+    startCommand: npm run start --workspace=@fieldsync/server
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      - key: API_HOST
+        value: 0.0.0.0
+      - key: API_PORT
+        value: "10000"
+      - key: SERVE_WEB
+        value: "true"
+      - key: TRUST_PROXY_HOPS
+        value: "1"
+      - key: APP_ORIGIN
+        sync: false
+      - key: LOG_LEVEL
+        value: info
+      - key: SESSION_TTL_HOURS
+        value: "168"
+      - key: AUTH_RATE_LIMIT
+        value: "60"
+      - key: DATABASE_URL
+        fromDatabase: { name: fieldsync-db, property: connectionString }
+      # Render's same-region private URL uses a self-signed certificate.
+      # Verified external TLS is an alternative documented in docs/DEPLOYMENT.md.
+      - key: POSTGRES_SSL
+        value: "false"
+      - key: REDIS_URL
+        fromService: { name: fieldsync-queue, type: keyvalue, property: connectionString }
+      - key: QUEUE_PREFIX
+        value: fieldsync-production
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_PUBLIC_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: "true"
+      - key: AI_ENABLED
+        value: "false"
+      - key: OPENAI_API_KEY
+        value: ""
+      - key: OPENAI_MODEL
+        value: gpt-5-mini
+      - key: OPENAI_TRANSCRIPTION_MODEL
+        value: gpt-transcribe
+      - key: AI_TIMEOUT_MS
+        value: "30000"
+      - key: AI_RATE_LIMIT
+        value: "10"
+      - key: AI_MAX_PER_HOUR
+        value: "20"
+
+  - type: worker
+    name: fieldsync-worker
+    runtime: node
+    region: singapore
+    plan: 0.5c-512mb
+    numInstances: 1
+    autoDeployTrigger: "off"
+    buildCommand: npm ci --omit=dev
+    startCommand: npm run worker
+    envVars:
+      - key: NODE_VERSION
+        fromService: { name: fieldsync-api, type: web, envVarKey: NODE_VERSION }
+      - key: NODE_ENV
+        value: production
+      - key: APP_ORIGIN
+        fromService: { name: fieldsync-api, type: web, envVarKey: APP_ORIGIN }
+      - key: LOG_LEVEL
+        fromService: { name: fieldsync-api, type: web, envVarKey: LOG_LEVEL }
+      - key: DATABASE_URL
+        fromDatabase: { name: fieldsync-db, property: connectionString }
+      - key: POSTGRES_SSL
+        fromService: { name: fieldsync-api, type: web, envVarKey: POSTGRES_SSL }
+      - key: REDIS_URL
+        fromService: { name: fieldsync-queue, type: keyvalue, property: connectionString }
+      - key: QUEUE_PREFIX
+        fromService: { name: fieldsync-api, type: web, envVarKey: QUEUE_PREFIX }
+      - key: S3_ENDPOINT
+        fromService: { name: fieldsync-api, type: web, envVarKey: S3_ENDPOINT }
+      - key: S3_PUBLIC_ENDPOINT
+        fromService: { name: fieldsync-api, type: web, envVarKey: S3_PUBLIC_ENDPOINT }
+      - key: S3_REGION
+        fromService: { name: fieldsync-api, type: web, envVarKey: S3_REGION }
+      - key: S3_BUCKET
+        fromService: { name: fieldsync-api, type: web, envVarKey: S3_BUCKET }
+      - key: S3_ACCESS_KEY_ID
+        fromService: { name: fieldsync-api, type: web, envVarKey: S3_ACCESS_KEY_ID }
+      - key: S3_SECRET_ACCESS_KEY
+        fromService: { name: fieldsync-api, type: web, envVarKey: S3_SECRET_ACCESS_KEY }
+      - key: S3_FORCE_PATH_STYLE
+        fromService: { name: fieldsync-api, type: web, envVarKey: S3_FORCE_PATH_STYLE }
+      - key: AI_ENABLED
+        fromService: { name: fieldsync-api, type: web, envVarKey: AI_ENABLED }
+      - key: OPENAI_API_KEY
+        fromService: { name: fieldsync-api, type: web, envVarKey: OPENAI_API_KEY }
+      - key: OPENAI_MODEL
+        fromService: { name: fieldsync-api, type: web, envVarKey: OPENAI_MODEL }
+      - key: OPENAI_TRANSCRIPTION_MODEL
+        fromService: { name: fieldsync-api, type: web, envVarKey: OPENAI_TRANSCRIPTION_MODEL }
+      - key: AI_TIMEOUT_MS
+        fromService: { name: fieldsync-api, type: web, envVarKey: AI_TIMEOUT_MS }
+
+  - type: keyvalue
+    name: fieldsync-queue
+    region: singapore
+    plan: 256mb
+    maxmemoryPolicy: noeviction
+    ipAllowList: []
+
+databases:
+  - name: fieldsync-db
+    region: singapore
+    plan: 0.5c-1g
+    postgresMajorVersion: "17"
+    databaseName: fieldsync
+    user: fieldsync
+    diskSizeGB: 5
+    ipAllowList: []

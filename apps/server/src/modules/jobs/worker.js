@@ -6,6 +6,9 @@ import { jobPayloadSchema,reportJobDataSchema,reportJobResultSchema,verification
 import { transaction } from '../../infrastructure/transaction.js';
 import { assertEvidenceKey } from '../../infrastructure/storage.js';
 import { findEvidence } from '../evidence/repository.js';
+import { findArtifact, completeArtifact } from '../ai/repository.js';
+import { createAiProvider, generationSchema } from '../ai/provider.js';
+import { redisConnection } from '../../infrastructure/redis.js';
 
 const maxAttempts = 5;
 const escape = (text) => String(text).replace(/[&<>"']/g,(char) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' })[char]);
@@ -16,11 +19,12 @@ export function prepareReport(inspection) {
     <ol>${inspection.template.items.map((item) => {
       const answer = inspection.answers.find((row) => row.itemId===item.id);
       return `<li><strong>${escape(item.label)}</strong> — ${escape(answer?.outcome ?? 'Unanswered')}<p>${escape(answer?.notes ?? '')}</p></li>`;
-    }).join('')}</ol><h2>Inspector summary</h2><p>${escape(inspection.reportText)}</p><h2>Evidence</h2><ul>${inspection.evidence.map((file) => `<li>${escape(file.name)} (${escape(file.mimeType)}, ${file.size} bytes)</li>`).join('')}</ul></body></html>`;
+    }).join('')}</ol><h2>Inspector summary</h2><p>${escape(inspection.reportText)}</p><h2>Evidence</h2><ul>${inspection.evidence.map((file) => `<li>${escape(file.name)} (${escape(file.mimeType)}, ${file.size} bytes)</li>`).join('')}</ul>
+    ${inspection.aiSources.length ? `<h2>Reviewed assistance provenance</h2><ul>${inspection.aiSources.map((source) => `<li>${escape(source.kind)} · ${escape(source.provider)} / ${escape(source.model)} · source v${source.sourceVersion} · human-reviewed at v${source.appliedVersion}</li>`).join('')}</ul>` : ''}</body></html>`;
   return reportJobResultSchema.parse({ sourceVersion:inspection.version,summary,html });
 }
 
-export async function processJob({ pool,storage }, pointer) {
+export async function processJob({ pool,storage,aiProvider = createAiProvider({ AI_ENABLED:false }) }, pointer) {
   const { organizationId,jobId } = jobPayloadSchema.parse(pointer), token = randomUUID();
   const claimed = await pool.query(`UPDATE background_jobs SET status='running',attempts=attempts+1,lease_token=$3,
     lease_until=clock_timestamp()+interval '60 seconds',updated_at=clock_timestamp()
@@ -32,8 +36,30 @@ export async function processJob({ pool,storage }, pointer) {
     pool.query(`UPDATE background_jobs SET lease_until=clock_timestamp()+interval '60 seconds' WHERE organization_id=$1 AND id=$2 AND lease_token=$3 AND status='running'`,[organizationId,jobId,token]).catch(() => {});
   },15000);
   try {
-    let result = {};
-    if (job.kind === 'prepare_report') {
+    let result = {}, generated = null, unavailable = false;
+    if (job.kind === 'assist_inspection') {
+      z.object({}).strict().parse(job.payload);
+      const artifact = await findArtifact(pool,organizationId,job.inspection_id,job.ai_artifact_id);
+      if (!artifact || artifact.evidence_id !== job.evidence_id) throw new Error('Assistance source mismatch');
+      if (artifact.status === 'queued') {
+        const revision = await pool.query(`SELECT snapshot FROM inspection_revisions WHERE organization_id=$1 AND inspection_id=$2 AND version=$3`,
+          [organizationId,job.inspection_id,artifact.source_version]);
+        const inspection = inspectionSchema.parse(revision.rows[0]?.snapshot);
+        if (inspection.organizationId !== organizationId || inspection.id !== job.inspection_id || inspection.version !== artifact.source_version) throw new Error('Assistance snapshot ownership or version mismatch');
+        const current = await pool.query('SELECT assigned_to,status FROM inspections WHERE organization_id=$1 AND id=$2', [organizationId,job.inspection_id]);
+        unavailable = !current.rowCount || current.rows[0].assigned_to !== artifact.requested_by || ['approved','cancelled'].includes(current.rows[0].status);
+        let evidence = null, bytes = null;
+        if (artifact.evidence_id && !unavailable) {
+          evidence = await findEvidence(pool,organizationId,job.inspection_id,artifact.evidence_id);
+          const source = inspection.evidence.find((row) => row.id === artifact.evidence_id);
+          unavailable = !evidence || evidence.status !== 'attached' || evidence.processing_status !== 'ready' || !source
+            || source.sha256 !== evidence.sha256 || (artifact.kind === 'image') !== evidence.mime_type.startsWith('image/');
+          if (!unavailable) bytes = await storage.read(evidence.object_key,evidence);
+        }
+        if (!unavailable) generated = generationSchema.parse(await aiProvider.generate({ kind:artifact.kind,inspection,evidence,bytes }));
+      }
+      result = { artifactId:job.ai_artifact_id, unavailable };
+    } else if (job.kind === 'prepare_report') {
       const data = reportJobDataSchema.parse(job.payload);
       const revision = await pool.query(`SELECT snapshot FROM inspection_revisions WHERE organization_id=$1 AND inspection_id=$2 AND version=$3`,[organizationId,job.inspection_id,data.sourceVersion]);
       if (!revision.rows[0]) throw new Error('Report revision missing');
@@ -65,6 +91,11 @@ export async function processJob({ pool,storage }, pointer) {
         WHERE organization_id=$1 AND id=$2 AND lease_token=$3 AND status='running' RETURNING id`,[organizationId,jobId,token,JSON.stringify(result)]);
       if (completed.rowCount && job.kind==='verify_evidence') await db.query(`UPDATE evidence SET processing_status='ready'
         WHERE organization_id=$1 AND inspection_id=$2 AND id=$3 AND status='attached'`,[organizationId,job.inspection_id,job.evidence_id]);
+      if (completed.rowCount && job.kind==='assist_inspection') {
+        if (generated) await completeArtifact(db,job,generated);
+        else if (unavailable) await db.query(`UPDATE ai_artifacts SET status='failed',completed_at=clock_timestamp()
+          WHERE organization_id=$1 AND inspection_id=$2 AND id=$3 AND status='queued'`,[organizationId,job.inspection_id,job.ai_artifact_id]);
+      }
     });
   } catch (error) {
     await transaction(pool,async (db) => {
@@ -73,6 +104,8 @@ export async function processJob({ pool,storage }, pointer) {
       [organizationId,jobId,token,job.attempts>=maxAttempts?'failed':'retry',new Date(Date.now()+1000*2**(job.attempts-1))]);
       if (changed.rowCount && job.kind==='verify_evidence' && job.attempts>=maxAttempts) await db.query(`UPDATE evidence SET processing_status='failed'
         WHERE organization_id=$1 AND inspection_id=$2 AND id=$3 AND status='attached'`,[organizationId,job.inspection_id,job.evidence_id]);
+      if (changed.rowCount && job.kind==='assist_inspection' && job.attempts>=maxAttempts) await db.query(`UPDATE ai_artifacts SET status='failed',completed_at=clock_timestamp()
+        WHERE organization_id=$1 AND inspection_id=$2 AND id=$3 AND status='queued'`,[organizationId,job.inspection_id,job.ai_artifact_id]);
     });
     throw error;
   } finally { clearInterval(heartbeat); }
@@ -85,10 +118,13 @@ export async function recoverExpiredJobs(pool) {
     UPDATE background_jobs SET status='failed',last_error='Worker lease expired after maximum attempts',
       lease_token=NULL,lease_until=NULL,updated_at=clock_timestamp()
     WHERE status='running' AND lease_until<now() AND attempts >= $1
-    RETURNING organization_id,inspection_id,evidence_id,kind
-  ) UPDATE evidence AS e SET processing_status='failed' FROM exhausted AS j
+    RETURNING organization_id,inspection_id,evidence_id,ai_artifact_id,kind
+  ), evidence_failed AS (UPDATE evidence AS e SET processing_status='failed' FROM exhausted AS j
     WHERE j.kind='verify_evidence' AND e.organization_id=j.organization_id
-      AND e.inspection_id=j.inspection_id AND e.id=j.evidence_id AND e.status='attached'`, [maxAttempts]);
+      AND e.inspection_id=j.inspection_id AND e.id=j.evidence_id AND e.status='attached' RETURNING e.id)
+  UPDATE ai_artifacts AS a SET status='failed',completed_at=clock_timestamp() FROM exhausted AS j
+    WHERE j.kind='assist_inspection' AND a.organization_id=j.organization_id
+      AND a.inspection_id=j.inspection_id AND a.id=j.ai_artifact_id AND a.status='queued'`, [maxAttempts]);
 }
 
 // Reap only old, unreferenced objects; recent promotions may still be committing.
@@ -104,8 +140,8 @@ export async function reconcileObjects(pool,storage,olderThan = new Date(Date.no
   }
 }
 
-export function createJobRuntime({ pool,storage,env,logger,queueName='fieldsync-jobs',intervalMs=5000 }) {
-  const redis = { host:env.REDIS_HOST,port:env.REDIS_PORT,password:env.REDIS_PASSWORD,connectTimeout:3000 };
+export function createJobRuntime({ pool,storage,env,logger,aiProvider = createAiProvider(env),queueName='fieldsync-jobs',intervalMs=5000 }) {
+  const redis = { ...redisConnection(env),connectTimeout:3000 };
   const connection = new Redis({ ...redis,maxRetriesPerRequest:null });
   // Queue commands fail promptly during an outage; required work remains in SQL.
   // BullMQ's blocking worker connection must retain unlimited request retries.
@@ -114,7 +150,7 @@ export function createJobRuntime({ pool,storage,env,logger,queueName='fieldsync-
   queueConnection.on('error',() => logger?.warn('Background queue connection unavailable'));
   const queue = new Queue(queueName,{ connection:queueConnection,prefix:env.QUEUE_PREFIX });
   queue.on('error',() => logger?.warn('Background queue unavailable'));
-  const worker = new Worker(queueName,async (job) => processJob({ pool,storage },job.data),{ connection,prefix:env.QUEUE_PREFIX,concurrency:2,lockDuration:30000 });
+  const worker = new Worker(queueName,async (job) => processJob({ pool,storage,aiProvider },job.data),{ connection,prefix:env.QUEUE_PREFIX,concurrency:2,lockDuration:30000 });
   worker.on('error',() => logger?.warn('Background worker unavailable'));
   worker.on('failed',() => logger?.warn('Background job will retry or remain failed in PostgreSQL'));
   let stopped=false,running=false,lastSweep=0;

@@ -7,7 +7,7 @@ export function publicInspection(row) {
   return inspectionSchema.parse({
     id: row.id, organizationId: row.organization_id, assetId: row.asset_id, templateId: row.template_id,
     assignedTo: row.assigned_to, asset: row.asset_snapshot, template: row.template_snapshot, worker: row.worker_snapshot,
-    answers: row.answers, reportText: row.report_text, evidence: row.evidence ?? [], status: row.status, version: row.version,
+    answers: row.answers, reportText: row.report_text, evidence: row.evidence ?? [], aiSources: row.ai_sources ?? [], status: row.status, version: row.version,
     reviewNote: row.review_note, submittedAt: row.submitted_at?.toISOString() ?? null,
     approvedAt: row.approved_at?.toISOString() ?? null, approvedBy: row.approved_by,
     createdBy: row.created_by, createdAt: row.created_at.toISOString(), updatedAt: row.updated_at.toISOString(),
@@ -59,10 +59,10 @@ export async function insertInspection(db, auth, input, snapshots) {
 export async function updateInspection(db, organizationId, id, baseVersion, next) {
   const result = await db.query(`UPDATE inspections SET answers = $3::jsonb, report_text = $4,
     status = $5, assigned_to = $6, worker_snapshot = $7::jsonb, review_note = $8,
-    submitted_at = $9, approved_at = $10, approved_by = $11, version = version + 1, updated_at = clock_timestamp()
+    submitted_at = $9, approved_at = $10, approved_by = $11, ai_sources = $13::jsonb, version = version + 1, updated_at = clock_timestamp()
     WHERE organization_id = $1 AND id = $2 AND version = $12 RETURNING *`,
   [organizationId, id, JSON.stringify(next.answers), next.reportText, next.status, next.assignedTo,
-    JSON.stringify(next.worker), next.reviewNote, next.submittedAt, next.approvedAt, next.approvedBy, baseVersion]);
+    JSON.stringify(next.worker), next.reviewNote, next.submittedAt, next.approvedAt, next.approvedBy, baseVersion, JSON.stringify(next.aiSources ?? [])]);
   return result.rows[0] ? publicInspection(result.rows[0]) : null;
 }
 export async function appendRevision(db, auth, inspection) {

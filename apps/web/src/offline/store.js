@@ -76,6 +76,25 @@ export class OfflineStore {
     if (expected) this.validate(workingCopySchema, expected);
     return this.transition(id, (copy, queue) => localChange(copy, queue, content, action, undefined, expected));
   }
+  acceptReview(inspection, expected) {
+    inspection=inspectionSchema.parse(inspection);
+    if (inspection.organizationId!==this.owner.organizationId || inspection.assignedTo!==this.owner.userId) throw new Error('Reviewed inspection belongs to another workspace.');
+    return this.db.transaction('rw',this.db.tables,async () => {
+      const copy=this.validate(workingCopySchema,await this.db.workingCopies.get(inspection.id));
+      const queue=(await this.db.outbox.where('inspectionId').equals(inspection.id).toArray()).map((row)=>this.validate(outboxEntrySchema,row));
+      if (inspection.version<copy.base.version) return false;
+      const previous=await this.db.records.get(inspection.id);
+      const detail=previous?.inspection.version===inspection.version ? previous.detail:null;
+      if (!previous || previous.inspection.version<=inspection.version) await this.db.records.put(this.validate(cachedInspectionSchema,{ ...this.owner,id:inspection.id,inspection,detail,unavailable:false }));
+      if (queue.length || copy.generation!==expected.generation || copy.base.version!==expected.baseVersion) {
+        if (queue.length && inspection.version>copy.base.version) await this.transition(inspection.id,
+          (current,entries)=>pauseRequest(current,entries,entries[0].sequence,'Reviewed server content changed. Your newer device edits are retained.',inspection));
+        return false;
+      }
+      await this.db.workingCopies.put({ ...initialCopy(this.owner,inspection),generation:copy.generation+1,acknowledgedGeneration:copy.generation+1 });
+      return true;
+    });
+  }
   prepare(entry) { return this.transition(entry.inspectionId, (copy, queue) => prepareRequest(copy, queue, entry.sequence)); }
   pause(entry, message, remote) { return this.transition(entry.inspectionId, (copy, queue) => pauseRequest(copy, queue, entry.sequence, message, remote)); }
   defer(entry, message) {

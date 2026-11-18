@@ -20,6 +20,8 @@
     "test:m3:browser": "node scripts/verify-m3-browser.js",
     "test:m4": "node --test --test-concurrency=1 tests/m4-*.test.js",
     "test:m4:browser": "node scripts/verify-m4-browser.js",
+    "test:m5": "node --test --test-concurrency=1 tests/m5-*.test.js",
+    "test:m5:browser": "node scripts/verify-m5-browser.js",
     "worker": "node apps/server/src/worker.js",
     "dev": "concurrently --kill-others --names api,web --prefix-colors cyan,green \"npm run dev --workspace=@fieldsync/server\" \"npm run dev --workspace=@fieldsync/web\"",
     "infra:up": "node scripts/infra.js up",

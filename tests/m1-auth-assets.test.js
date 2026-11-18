@@ -297,5 +297,5 @@ test('rerunning migrations is a no-op against the real test database', async () 
   const applied = await runMigrations(pool, quiet, schema);
   assert.equal(applied.length, 0);
   const migrations = await pool.query('SELECT name FROM pgmigrations ORDER BY id');
-  assert.deepEqual(migrations.rows.map((row) => row.name), ['001_init_auth', '002_init_assets', '003_init_inspections', '004_init_evidence_jobs']);
+  assert.deepEqual(migrations.rows.map((row) => row.name), ['001_init_auth', '002_init_assets', '003_init_inspections', '004_init_evidence_jobs', '005_init_ai_analytics']);
 });

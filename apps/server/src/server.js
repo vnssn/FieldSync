@@ -1,4 +1,6 @@
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
+import { existsSync } from 'node:fs';
 import { env } from './config/env.js';
 import { createLogger } from './infrastructure/logger.js';
 import { createPool } from './infrastructure/database.js';
@@ -12,9 +14,13 @@ pool.on('error', () => logger.error('An idle PostgreSQL connection failed'));
 
 const getHealth = createHealthCheck({ pool, env, logger });
 const storage=createEvidenceStorage(env);
-const app = createApp({ getHealth, logger, pool, env,storage });
+const webDirectory=env.SERVE_WEB ? fileURLToPath(new URL('../../web/dist/',import.meta.url)):undefined;
+if (webDirectory && !existsSync(`${webDirectory}/index.html`)) throw new Error('Build the web client before starting SERVE_WEB.');
+const app = createApp({ getHealth, logger, pool, env,storage,webDirectory });
 
 const server = createServer(app);
+server.headersTimeout=10000;
+server.requestTimeout=15000;
 
 server.on('error', async (error) => {
   logger.error({ code: error.code, port: env.API_PORT }, 'Could not start API');

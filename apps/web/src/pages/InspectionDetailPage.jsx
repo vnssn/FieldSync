@@ -11,6 +11,7 @@ import { ErrorNotice, PageIntro, QueryState } from '../components/ui.jsx';
 import { useOnlineMutation, MutationNotice, InspectionReport, AuditHistory } from '../components/inspection-ui.jsx';
 import { WorkerInspectionDetail } from './WorkerInspections.jsx';
 import { EvidencePanel } from '../components/evidence-ui.jsx';
+import { AiPanel } from '../components/ai-ui.jsx';
 
 function AdminActions({ inspection, organizationId, onReload }) {
   const [note, setNote] = useState('');
@@ -65,6 +66,7 @@ function OnlineInspectionDetailPage() {
           <option key={entry.id} value={String(entry.version)}>Historical version {entry.version}</option>)}</select></label>
       {revision && <p className="mt-4 text-sm text-amber-800">Historical report · Version {revision}</p>}
       <InspectionReport inspection={shown} /><EvidencePanel inspection={shown} /><AuditHistory events={query.data.events} />
+      {!revision && <AiPanel inspection={inspection} readOnly />}
     </>}</QueryState>
   </>;
 }

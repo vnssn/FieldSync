@@ -32,21 +32,28 @@ export const reassignInspectionSchema = z.object({ assignedTo: z.uuid(), ...upda
 export const cancelInspectionSchema = z.object({ note, ...update }).strict();
 export const reviewInspectionSchema = z.object({ decision: z.enum(['approve', 'request_changes']), note, ...update }).strict()
   .refine((value) => value.decision !== 'request_changes' || value.note.length > 0, 'Explain the changes requested.');
+export const aiProvenanceSchema = z.object({
+  artifactId: z.uuid(), kind: z.enum(['image', 'voice', 'report']), sourceVersion: version,
+  appliedVersion: version, provider: z.string().max(100), model: z.string().max(150),
+  mode: z.enum(['provider', 'fallback']), reviewedBy: z.uuid(), reviewedAt: z.iso.datetime(),
+}).strict().refine((value) => value.sourceVersion < value.appliedVersion, 'Assistance must precede its applied version.');
 export const inspectionSchema = z.object({
   id: z.uuid(), organizationId: z.uuid(), assetId: z.uuid(), templateId: z.uuid(), assignedTo: z.uuid(),
   asset: z.object({ id: z.uuid(), code: z.string(), name: z.string(), category: z.string(), location: z.string() }).strict(),
   template: templateSnapshotSchema,
   worker: z.object({ id: z.uuid(), name: z.string(), email: z.email() }).strict(),
-  ...content, evidence: z.array(evidenceSnapshotSchema).max(50).default([]), status: z.enum(Object.values(INSPECTION_STATUSES)), version,
+  ...content, evidence: z.array(evidenceSnapshotSchema).max(50).default([]),
+  aiSources: z.array(aiProvenanceSchema).max(100).default([]), status: z.enum(Object.values(INSPECTION_STATUSES)), version,
   reviewNote: note, submittedAt: z.iso.datetime().nullable(), approvedAt: z.iso.datetime().nullable(),
   approvedBy: z.uuid().nullable(), createdBy: z.uuid(), createdAt: z.iso.datetime(), updatedAt: z.iso.datetime(),
 }).strict().refine((value) => value.assetId === value.asset.id && value.templateId === value.template.id
-  && value.assignedTo === value.worker.id, 'Inspection snapshots must match their references.');
+  && value.assignedTo === value.worker.id && value.aiSources.every((source) => source.appliedVersion <= value.version),
+  'Inspection snapshots must match their references and versions.');
 export const inspectionsResponseSchema = z.object({ inspections: z.array(inspectionSchema) }).strict();
 export const inspectionListQuerySchema = z.object({ status: z.enum(['all', ...Object.values(INSPECTION_STATUSES)]).default('all') }).strict();
 export const auditEventSchema = z.object({
   id: z.uuid(), organizationId: z.uuid(), resourceId: z.uuid(), actorUserId: z.uuid(), actorName: z.string(),
-  eventType: z.enum(['created', 'updated', 'saved', 'submitted', 'changes_requested', 'approved', 'reassigned', 'cancelled', 'evidence_attached', 'evidence_removed']),
+  eventType: z.enum(['created', 'updated', 'saved', 'submitted', 'changes_requested', 'approved', 'reassigned', 'cancelled', 'evidence_attached', 'evidence_removed', 'ai_applied']),
   version, details: z.object({
     changes: z.record(z.string(), z.object({ before: z.unknown(), after: z.unknown() }).strict()), note,
   }).strict(), createdAt: z.iso.datetime(),

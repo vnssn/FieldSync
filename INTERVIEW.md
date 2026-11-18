@@ -1,12 +1,12 @@
 # FieldSync: Interview and Project Viva Study Guide
 
-Source snapshot: M0-M4, refreshed and verified on 2026-11-17. Read this alongside [EGM.md](./EGM.md), [CONTEXT.md](./CONTEXT.md), and [IMPLEMENTATION.md](./IMPLEMENTATION.md). Paths below are relative to the repository root; function names identify actual implementations rather than hypothetical components.
+Source snapshot: M0-M5, refreshed on 2026-11-17. Final verification is recorded in [IMPLEMENTATION.md](./IMPLEMENTATION.md). Read this alongside [EGM.md](./EGM.md) and [CONTEXT.md](./CONTEXT.md). Paths below are relative to the repository root; function names identify actual implementations rather than hypothetical components. Render deployment remains gated on the user's active-account switch and approval.
 
 Three corrections to remember before an interview:
 
 - Passwords use **Argon2id**, not scrypt. SHA-256 is used separately for session-token digests and mutation-request fingerprints.
 - There is no PostgreSQL table named `audit_events`. The actual audit tables are `asset_events`, `template_events`, and `inspection_events`; full inspection snapshots live in `inspection_revisions`.
-- Real PostgreSQL/MinIO/Redis/BullMQ and browser tests coexist with pure tests using an in-memory store and injected transports. Do not describe every test as mock-free. Evidence uploads/jobs are implemented; AI remains planned.
+- Real PostgreSQL/MinIO/Redis/BullMQ and browser tests coexist with pure tests using an in-memory store and injected transports. Provider contract success/failure is simulated by a local HTTP server; no paid model call or model accuracy is claimed. Evidence, reviewed AI, voice recording and analytics are implemented.
 
 ## Contents
 
@@ -22,7 +22,7 @@ Three corrections to remember before an interview:
 
 ### 1.1 A pitch to say aloud
 
-> FieldSync helps organizations inspect equipment when field connectivity is unreliable. Admins maintain assets and versioned checklist templates, assign inspections to workers, and review submitted reports. Workers complete checklists, write findings and retain photos/audio on their device, including offline. Dexie commits local edits/files with an ordered mutation outbox. The client replays Express endpoints using stable mutation IDs and base versions. PostgreSQL commits inspection changes, revisions, audits, successful receipts and required job intent together. Files upload into private MinIO staging, are verified and promoted to immutable objects, then join the versioned inspection. Lost responses retry safely; conflicting edits require explicit review. BullMQ schedules PostgreSQL-backed verification, cleanup and manual report archives with leases and reconciliation. Tenant identity comes from sessions; composite FKs and storage prefixes enforce ownership. The code is a JavaScript modular monolith with React, Express and shared Zod contracts. M0-M4 are implemented; human-reviewed AI remains M5.
+> FieldSync helps organizations inspect equipment when field connectivity is unreliable. Admins manage assets and versioned checklists, assign workers and review submitted reports. Workers retain checklists, photos and voice recordings offline in Dexie with an ordered outbox. Stable mutation IDs and base versions let PostgreSQL commit content, audits, revisions, receipts and job intent together. Evidence uploads into private MinIO staging, is verified and becomes immutable. BullMQ schedules verification, cleanup, report archives and optional AI assistance using SQL-backed retries and leases. AI originals remain separate until a worker edits and explicitly confirms a current-source suggestion; missing providers return labeled fallbacks. Managers still approve reports. Tenant sessions, composite FKs and storage prefixes enforce ownership, while analytics describe accessible inspections and assets. M0-M5 are implemented in a JavaScript modular monolith; local recovery and deployment readiness are verified separately from any cloud deployment.
 
 ### 1.2 Users, problem, and implemented scope
 
@@ -33,7 +33,7 @@ Three corrections to remember before an interview:
 
 The difficult problem is preserving intent across unreliable networks and concurrent administrative changes. A local save, a server commit, a received HTTP response, and an admin approval are different events. FieldSync makes these distinctions visible and gives each a separate persistence or validation mechanism.
 
-Current findings are failed-check notes and `reportText`, without a separate findings table. M3 persists checklist/narrative data; M4 extends that workspace with photo/audio blobs, upload ordering and evidence membership. Asset/team/template/administrative operations remain online. Reports use deterministic React printing and version-bound background HTML archives. AI analysis, voice recording/transcription and PDF generation are not implemented.
+Current findings are failed-check notes and `reportText`, without a separate findings table. M3 persists checklist/narrative data; M4 adds photo/audio blobs, upload ordering and evidence membership; M5 adds native voice recording and human-reviewed AI originals/provenance. AI request/review, analytics and administrative operations remain online. Reports use React printing and version-bound background HTML archives, including reviewed assistance provenance. Generated PDFs are not implemented. AI image/voice fallbacks invent no observations/transcripts; report fallback summarizes existing recorded data.
 
 ### 1.3 Architecture diagram
 
@@ -65,7 +65,7 @@ Current findings are failed-check notes and `reportText`, without a separate fin
                                            | snapshots / audits / receipts|
                                            +-------------------------------+
 
-        Current infrastructure / tooling          Current M4 runtime
+        Current infrastructure / tooling          Current M4-M5 runtime
   +------------------------------+          +-------------------------------+
   | Redis 8                      |<---------| BullMQ jobs / retry scheduling |
   | Current API health: PING     |          | Durable PostgreSQL job intent |
@@ -77,7 +77,9 @@ Current findings are failed-check notes and `reportText`, without a separate fin
   | Direct signed POST uploads  |          +-------------------------------+
   +------------------------------+
 
-  HTTP/SQL/storage/queue paths shown here are implemented through M4.
+  HTTP/SQL/storage/queue paths shown here are implemented through M5.
+  AI jobs use the optional OpenAI adapter; human review applies current results.
+  AI originals/reviews and scoped analytics use the same tenant database.
   Redis is also probed by the current API; MinIO is checked by setup/check:env.
 ```
 
@@ -89,15 +91,17 @@ Root `package.json` declares `apps/web`, `apps/server`, and `packages/contracts`
 
 | Workspace / layer | Actual source entry points | Purpose |
 | --- | --- | --- |
-| Shared contracts | `packages/contracts/src/index.js`; `auth.js`, `assets.js`, `inspections.js`, `offline.js`, `evidence.js`, `health.js`, `constants.js` | Browser/server/local-store/job agreement at runtime; only Zod is a package dependency |
+| Shared contracts | `packages/contracts/src/index.js`; `auth.js`, `assets.js`, `inspections.js`, `offline.js`, `evidence.js`, `ai.js`, `analytics.js`, `health.js`, `constants.js` | Browser/server/local-store/job agreement at runtime; only Zod is a package dependency |
 | Express composition | `apps/server/src/app.js`, `apps/server/src/server.js` | Middleware/router composition versus listener/pool/shutdown ownership |
-| Feature routers | `apps/server/src/modules/{auth,users,assets,templates,inspections,evidence}/routes.js` | HTTP shape, status codes, authentication/role guards |
+| Feature routers | `apps/server/src/modules/{auth,users,assets,templates,inspections,evidence,ai,analytics}/routes.js` | HTTP shape, status codes, authentication/role guards |
 | Business services | Corresponding `service.js` files | Access checks, state transitions, optimistic version checks, transaction orchestration |
 | Repositories | Corresponding `repository.js` files | Explicit tenant predicates, parameterized SQL, response serialization |
 | Shared infrastructure | `apps/server/src/infrastructure/{transaction,mutations,audit,database,migrations}.js` | Transaction boundaries, replay protocol, audit operations, pool and migration configuration |
 | Web composition | `apps/web/src/main.jsx`, `App.jsx`, `auth.jsx`, `query-client.js` | Providers, role/session guards, routing, online query behavior |
 | Offline worker | `apps/web/src/offline/{state,store,sync,session,evidence}.js`, `provider.jsx`; `apps/web/src/pages/WorkerInspections.jsx` | Local transitions/blobs, upload replay, identity coordination, worker UI |
 | Background runtime | `apps/server/src/worker.js`, `modules/jobs/{repository,worker}.js`, `infrastructure/storage.js` | Durable job insertion, fenced claims/outcomes, Redis scheduling, storage verification/cleanup and HTML archives |
+| Assistance / analytics | `modules/ai/{provider,repository,service,routes}.js`, `modules/analytics/{service,routes}.js`; web `ai-ui.jsx`, `VoiceRecorder.jsx`, `DashboardPage.jsx` | Source-bound suggestions, explicit reviews, offline audio capture and tenant/assignment-scoped aggregates |
+| Deployment / recovery | `render.yaml`, `docs/{DEPLOYMENT,SECURITY,BACKUP_RESTORE}.md` | Local hosting blueprint, secret/network policy, recovery procedure and mandatory Render account-switch gate |
 
 The design keeps cross-table inspection updates inside one PostgreSQL transaction, avoids network boundaries between business modules, and shares validation without duplicating schema definitions. The cost is a shared API deployment and database: modules cannot scale or release independently, and changes still need integration testing.
 
@@ -124,8 +128,9 @@ The complete application schema below comes from:
 - `apps/server/migrations/002_init_assets.js`
 - `apps/server/migrations/003_init_inspections.js`
 - `apps/server/migrations/004_init_evidence_jobs.js`
+- `apps/server/migrations/005_init_ai_analytics.js`
 
-There are **thirteen application tables**. `pgmigrations` is a separate node-pg-migrate bookkeeping table, configured in `apps/server/src/infrastructure/migrations.js`; it is not a business table declared by these four migrations.
+There are **fifteen application tables**. `pgmigrations` is a separate node-pg-migrate bookkeeping table, configured in `apps/server/src/infrastructure/migrations.js`; it is not a business table declared by these five migrations.
 
 In the column inventories, **NN** means `NOT NULL`. Every primary-key column is also implicitly NN. A dash in the default column means no declared SQL default. UUIDs are supplied by application `randomUUID()`, not generated by a PostgreSQL UUID default. `INT` is PostgreSQL's 32-bit integer. Unspecified foreign-key update/delete actions use PostgreSQL's default `NO ACTION`; composite FKs use default `MATCH SIMPLE` and are not declared deferrable.
 
@@ -243,6 +248,7 @@ The database does not validate every item's UUID/label or item-ID uniqueness; sh
 | `answers` | JSONB, NN | `'[]'::jsonb` | Checklist answers |
 | `report_text` | TEXT, NN | `''` | Human-authored narrative |
 | `evidence` | JSONB, NN | `'[]'::jsonb` | M4 attachment metadata snapshots; membership is part of the business version |
+| `ai_sources` | JSONB, NN | `'[]'::jsonb` | M5 human-reviewed assistance provenance carried into revisions/reports |
 | `status` | TEXT, NN | `'assigned'` | Workflow state |
 | `version` | INT, NN | `1` | Whole-inspection optimistic version |
 | `review_note` | TEXT, NN | `''` | Admin review/cancellation note |
@@ -304,7 +310,7 @@ Indexes: implicit `template_events_pkey`; explicit `template_events_history_idx(
 | `details` | JSONB, NN | — | `{ changes, note }` |
 | `created_at` | TIMESTAMPTZ, NN | `clock_timestamp()` | Event wall-clock time |
 
-Constraints: PK; positive version CHECK; event type in `created`, `saved`, `submitted`, `changes_requested`, `approved`, `reassigned`, `cancelled`, plus M4's `evidence_attached` and `evidence_removed`; composite inspection FK with `ON DELETE CASCADE`; composite actor FK to `users`, default `NO ACTION`.
+Constraints: PK; positive version CHECK; event type in `created`, `saved`, `submitted`, `changes_requested`, `approved`, `reassigned`, `cancelled`, plus M4's `evidence_attached`/`evidence_removed` and M5's `ai_applied`; composite inspection FK with `ON DELETE CASCADE`; composite actor FK to `users`, default `NO ACTION`.
 
 Indexes: implicit `inspection_events_pkey`; explicit `inspection_events_history_idx(organization_id, inspection_id, version)` and `inspection_events_actor_idx(organization_id, actor_user_id)`. The shared audit schema also accepts `updated` for templates, but this table's SQL event CHECK does not include it.
 
@@ -339,7 +345,7 @@ Indexes: implicit `inspection_revisions_pkey`, `inspection_revisions_organizatio
 
 Constraints: PK `(organization_id, user_id, mutation_id)`; composite user FK with `ON DELETE CASCADE`; nullable composite template and inspection FKs, both with `ON DELETE CASCADE`; CHECK `template_id IS NULL OR inspection_id IS NULL`. That last expression permits **at most one** resource reference, including both NULL; it does not require exactly one. No SQL CHECK validates hash length or the outcome envelope.
 
-Indexes: implicit `mutation_receipts_pkey`; explicit `receipts_template_idx(organization_id, template_id)` and `receipts_inspection_idx(organization_id, inspection_id)`. Mutation IDs share one namespace per organization/actor across M2/M4 operations, not one namespace per inspection. No receipt expiry/pruning job currently exists.
+Indexes: implicit `mutation_receipts_pkey`; explicit `receipts_template_idx(organization_id, template_id)` and `receipts_inspection_idx(organization_id, inspection_id)`. Mutation IDs share one namespace per organization/actor across M2/M4/M5 operations, not one namespace per inspection. No receipt expiry/pruning job currently exists.
 
 #### `evidence` — migration 004
 
@@ -371,7 +377,8 @@ Composite inspection/creator FKs include organization. UNIQUE constraints cover 
 | `organization_id` | UUID, NN | — | Job owner |
 | `inspection_id` | UUID, NN | — | Parent inspection |
 | `evidence_id` | UUID, nullable | — | Required for evidence jobs, absent for reports |
-| `kind` | TEXT, NN | — | verify_evidence/cleanup_stage/cleanup_evidence/prepare_report |
+| `ai_artifact_id` | UUID, nullable | — | M5 assistance artifact; only present for AI jobs |
+| `kind` | TEXT, NN | — | verify_evidence/cleanup_stage/cleanup_evidence/prepare_report/assist_inspection |
 | `dedupe_key` | TEXT, NN | — | Unique required operation within an organization |
 | `payload` | JSONB, NN | `{}` | Validated object: empty, staging-key generation, or sourceVersion |
 | `status` | TEXT, NN | `queued` | queued/running/retry/completed/failed |
@@ -379,15 +386,54 @@ Composite inspection/creator FKs include organization. UNIQUE constraints cover 
 | `run_after` | TIMESTAMPTZ, NN | `clock_timestamp()` | Next eligible dispatch |
 | `lease_token` | UUID, nullable | — | Fences each claimed attempt |
 | `lease_until` | TIMESTAMPTZ, nullable | — | Sixty-second ownership deadline |
-| `result` | JSONB, nullable | — | Verified-file result or escaped report HTML/summary/sourceVersion |
+| `result` | JSONB, nullable | — | Verified-file result, report HTML/summary/sourceVersion, or M5 artifact/unavailable pointer |
 | `last_error` | TEXT, nullable | — | Generic safe failure description |
 | `created_at`, `updated_at` | TIMESTAMPTZ, NN | `clock_timestamp()` | Job lifecycle timestamps |
 
 UNIQUE organization/id and organization/dedupe_key constraints prevent duplicate required work. The evidence FK binds **organization, inspection and evidence ID together**; two independent tenant FKs would still permit a same-tenant cross-inspection reference. Job CHECKs validate kind/status, nonnegative attempts, object payload and evidence presence appropriate to kind. `jobs_due_idx`, `jobs_inspection_idx`, and `jobs_evidence_idx` support dispatch/scoped history. This table doubles as the publication outbox; Redis loss does not remove the SQL intent.
 
+Migration 005 adds the composite `(organization_id,inspection_id,ai_artifact_id)` FK and `jobs_ai_artifact_idx`. AI jobs use an empty payload and the artifact's frozen source revision; their result points to the artifact/unavailable outcome. The worker checks that job evidence matches artifact evidence. The original M4 job status endpoint still exposes verification/report jobs; AI status is exposed through the scoped artifact endpoint.
+
+#### `ai_artifacts` — migration 005
+
+| Column | Type / nullability | Default | Meaning |
+| --- | --- | --- | --- |
+| `id` | UUID, PK | — | Original assistance identity |
+| `organization_id`, `inspection_id` | UUID, NN | — | Owner and aggregate |
+| `evidence_id` | UUID, nullable | — | Selected photo/audio; NULL for a report |
+| `source_version` | INT, NN | — | Existing immutable inspection revision, positive and below INT maximum |
+| `kind` | TEXT, NN | — | image/voice/report |
+| `requested_by` | UUID, NN | — | Assigned requesting worker |
+| `status` | TEXT, NN | queued | queued/ready/failed |
+| `provider`, `model`, `mode` | TEXT, nullable | — | Origin/model and provider/fallback mode |
+| `fallback_reason` | TEXT, nullable | — | disabled/missing_key/provider_error when in fallback mode |
+| `prompt_version` | TEXT, NN | m5-v1 | Version of adapter instructions |
+| `provider_request_id` | TEXT, nullable | — | Provider response provenance |
+| `original_output`, `raw_output` | JSONB / TEXT, nullable | — | Structured original and retained raw model/transcript output |
+| `created_at` | TIMESTAMPTZ, NN | clock_timestamp() | Request time |
+| `completed_at` | TIMESTAMPTZ, nullable | — | Ready/failed settlement time |
+
+Composite FKs bind source revision `(organization_id,inspection_id,source_version)`, evidence `(organization_id,inspection_id,evidence_id)` and requester `(organization_id,requested_by)`. UNIQUE `(organization_id,inspection_id,id)` supports review/job references. `UNIQUE NULLS NOT DISTINCT (organization_id,inspection_id,source_version,kind,evidence_id)` deduplicates report requests even though their evidence is NULL. Ready rows require original/raw/provider/model/mode/completion metadata. Fallback rows require a reason; image/voice require evidence, reports forbid it.
+
+`guard_ai_artifact()` rejects source-identity changes and all updates once the old status is no longer queued. Services do not delete original outputs. `ai_artifacts_requester_idx` supports scoped hourly budgets; `ai_artifacts_evidence_idx` supports source lookups. SQL checks require object-shaped original JSON; bounded text/findings/checklist validity are enforced through Zod/provider validation.
+
+#### `ai_reviews` — migration 005
+
+| Column | Type / nullability | Default | Meaning |
+| --- | --- | --- | --- |
+| `id` | UUID, PK | — | Human review identity |
+| `organization_id`, `inspection_id`, `artifact_id` | UUID, NN | — | Tenant/aggregate/original artifact |
+| `decision` | TEXT, NN | — | apply/reject |
+| `confirmed_output` | JSONB, nullable | — | Human-edited answers/report text for apply |
+| `reviewed_by` | UUID, NN | — | Authenticated reviewer |
+| `applied_version` | INT, nullable | — | New inspection revision for apply |
+| `reviewed_at` | TIMESTAMPTZ, NN | clock_timestamp() | Human decision time |
+
+Composite artifact/reviewer/applied-revision FKs prevent tenant and aggregate mixing. UNIQUE `(organization_id,inspection_id,artifact_id)` permits one review. Apply requires object-shaped confirmed output and a positive applied revision; reject requires both fields NULL. Service permissions additionally restrict applying to the assigned worker, current source version and editable state; admins can reject and later approve submitted reports. Reviews are append-only through the API, without a separate SQL immutability trigger. Reviewer/version indexes support references. Inspection `ai_sources` and saved revisions retain model/source/human-review provenance, separate from original and confirmed content.
+
 ### 2.2 Index inventory and query-plan reasoning
 
-The four migrations declare **26 explicit indexes**: 2 in 001, 4 in 002, 15 in 003 and 5 in 004. PK/UNIQUE constraints create 26 implicit unique indexes. The real development database verification found **52 application indexes**, excluding migration bookkeeping.
+The five migrations declare **32 explicit indexes**: 2 in 001, 4 in 002, 15 in 003, 5 in 004 and 6 in 005. PK/UNIQUE constraints create 31 implicit unique indexes. The real development database verification found **63 application indexes**, excluding migration bookkeeping. M5 adds requester/evidence/review/job indexes and `inspections_analytics_idx(organization_id,created_at,id)`; analytics compute bounded reads without an extra analytics table.
 
 Tenant ID is generally the first key because most directory/history operations start with tenant equality. B-tree index left-prefix behavior matters: `(organization_id, inspection_id, version)` supports a tenant/inspection history scan; an index on `inspection_id` alone would not express the application's principal scope as directly.
 
@@ -578,7 +624,7 @@ Device acknowledges M locally and removes only that completed intent.
 
 If the client generated a new ID after the lost response, it would lose the ability to correlate the retry with the committed operation. If it changed content under M, the server would reject ID reuse. Stable identity plus immutable attempted payload is the required pair.
 
-This gives replay-safe, effectively once-per-receipt business effects inside PostgreSQL while requests may be delivered multiple times. It does not guarantee exactly-once networks or future external MinIO/AI side effects. Successful receipt bodies are snapshots of the original result, not automatically refreshed current state; separate reads obtain newer shared state.
+This gives replay-safe, effectively once-per-receipt business effects inside PostgreSQL while requests may be delivered multiple times. It does not guarantee exactly-once networks or external MinIO/AI execution. Successful receipt bodies are snapshots of the original result, not automatically refreshed current state; separate reads obtain newer shared state.
 
 ### 3.7 Atomicity of revisions, audits, and receipts
 
@@ -862,6 +908,8 @@ Client `RequireSession`/`RequireAdmin` guards and role-aware navigation are usab
 | `packages/contracts/src/assets.js` | Nonempty trimmed code/name/category/location limits 64/160/100/240; status enum; numeric baseVersion; update must include an editable field; query status/q limits |
 | `packages/contracts/src/inspections.js` | Template items 1-50 with unique UUIDs and labels up to 240; template name 160/instructions 2000; unique answer IDs, nullable outcomes, notes 1000; report 10000; review note 2000; mandatory mutationId and update baseVersion; snapshot reference agreement |
 | `packages/contracts/src/evidence.js` | Simple filenames up to 180 characters; allowed photo/audio MIME types; 10/25 MiB limits; lowercase SHA-256; UUID ownership/mutation/job pointers; bounded membership baseVersion; strict upload, processing and report result schemas |
+| `packages/contracts/src/ai.js` | Source-bound image/voice/report requests; explicit confirmed apply/reject; bounded unique checklist findings/transcript/report text; original/review/model metadata schemas |
+| `packages/contracts/src/analytics.js` | Strict 7/30/90-day/asset queries; safe integer counts, current states, bounded daily activity and at most 50 asset summaries |
 | `packages/contracts/src/offline.js` | Raw local text; workspace IDs; row/reference ownership; matching outbox mutation IDs and checklist membership; nonnegative generations with acknowledged <= local |
 | `packages/contracts/src/health.js` | Exact health/error envelopes; finite nonnegative latency; overall health agrees with dependencies; UUID requestId |
 
@@ -877,15 +925,15 @@ This is runtime validation in `.js`/`.jsx`, not TypeScript compile-time typing. 
 
 The fixed audit table/key map and validated migration/test schema names are the only sources for those interpolated SQL identifiers; values remain parameters. Identifiers cannot generally be bound as `$1`, so allowlisting matters. `createPool()` validates `search_path` identifiers with a conservative regex before constructing its connection option.
 
-`config/schema.js` parses boolean strings explicitly, so `AI_ENABLED=false` is Boolean false, not a truthy string. Production configuration requires HTTPS APP_ORIGIN. Server `.env` loading is explicit in `config/env.js`; Vite exposes only VITE-prefixed variables rather than database/Redis/S3 secrets. Docker ports bind to loopback. `server.js` closes the listener/pool on signals with a 10-second shutdown deadline.
+`config/schema.js` parses boolean strings explicitly, so `AI_ENABLED=false` is Boolean false, not a truthy string. Production requires HTTPS APP_ORIGIN and storage endpoints. DATABASE_URL/REDIS_URL hosting adapters support verified external TLS. Server `.env` loading is explicit; Vite exposes only VITE-prefixed variables rather than database/Redis/S3/provider secrets. Docker ports bind to loopback. API and worker shutdown have ten-second deadlines; interrupted jobs recover through leases. HTTP CSP restricts scripts/storage connections and permits self-only microphone recording and blob media.
 
-No login rate limiter, email verification, password reset, MFA, local-data encryption, general user-role management, antivirus/content scanning, or production recovery exercise is implemented. M4 validates size/MIME signatures/checksums and ownership; this is not malware scanning. Some omitted features are explicitly excluded; others require future hardening decisions.
+`http/rate-limit.js` implements bounded per-process auth/AI burst guards (60/minute/peer and 10/minute/tenant/user by default). PostgreSQL separately serializes the durable 20/hour/actor AI budget across instances. These are not a distributed brute-force prevention guarantee. Trust proxy defaults to zero; the proposed Render ingress uses one hop. Email verification/reset, MFA, local-data encryption, general role management and antivirus scanning remain outside scope. M4 MIME/checksum validation is not malware scanning. A real local recovery drill is implemented; continuous production backups and cloud recovery are operator/deployment work described in [SECURITY.md](./docs/SECURITY.md) and [BACKUP_RESTORE.md](./docs/BACKUP_RESTORE.md).
 
 ## 6. Testing Strategy & Engineering Trade-offs
 
 ### 6.1 Test pyramid and recorded verification
 
-`IMPLEMENTATION.md` records the M4 verification on 2026-11-17: **80 tests passed, zero failed/skipped**, migration 004 applied, a successful production build, and successful M3/M4 headless Edge checks. The count is **9 foundation + 14 M1 PostgreSQL + 17 M2 PostgreSQL + 3 M3 PostgreSQL + 14 core M3 + 23 M4 integration = 80**. M4 integration uses actual PostgreSQL/MinIO and real Redis/BullMQ where delivery/recovery is exercised, with controlled local-store/transport/crash faults.
+`IMPLEMENTATION.md` records M5 verification on 2026-11-17: **110 automated tests passed, zero failed/skipped**, migration 005 applied, and a successful production build. The count is **9 foundation + 14 M1 + 17 M2 + 3 PostgreSQL M3 + 14 core M3 + 23 M4 + 18 M5 integration + 6 provider + 5 security + 1 restore = 110**. Real PostgreSQL/MinIO/Redis/BullMQ coexist with controlled transport/crash faults and local provider HTTP simulations. Browser harness results and their limits are recorded separately; no paid provider or Render deployment is claimed.
 
 | File | Layer | Main evidence |
 | --- | --- | --- |
@@ -896,13 +944,17 @@ No login rate limiter, email verification, password reset, MFA, local-data encry
 | `tests/m3-postgres.test.js` | In-memory local transition fixture + real HTTP/PostgreSQL server | Actual receipt replay after response loss, new-ID merge submission, cancellation/session failure retention |
 | `scripts/verify-m3-browser.js` | Built React app + actual IndexedDB/service worker + real PostgreSQL | Offline save/submission, reload/restart, reconnect, two tabs, tenant switch/logout, expiry, reassignment return, quota retry, mobile/cache/page-error checks |
 | `tests/m4-integration.test.js` | Real PostgreSQL/MinIO + Redis/BullMQ; controlled offline/worker faults | Tenant/composite-key boundaries, constrained policies, validation/promotion, rollback/removal cleanup, immutable closed membership, readiness gates, file replay/conflicts, archives, retries, lost entries, real process termination and lease fencing |
+| `tests/m5-integration.test.js` | 18 real PostgreSQL/MinIO/Redis/BullMQ cases, including local HTTP provider simulation | Source/review/tenant boundaries, explicit apply/reject, immutable originals, rollback/retry/reconciliation/fencing, durable cost budget and analytics scope/performance |
+| `tests/m5-provider.test.js` | 6 provider contract simulations on a real local HTTP server | Structured responses, multipart transcription, model provenance, bounded failure/fallback/timeout and partial transcription retention; no paid calls |
+| `tests/m5-security.test.js` | 5 mixed real HTTP/URL-adapter and pure boundary cases | Peer/actor throttling, production configuration, CSP/microphone/no-store and hosting adapters |
+| `tests/m5-restore.test.js` | 1 actual pg_dump/pg_restore plus MinIO/Redis recovery | Restored originals, reviews, provenance, revisions, receipts and jobs in disposable targets |
 | `scripts/verify-m4-browser.js` | Built app + actual Dexie blobs + real PostgreSQL/MinIO/BullMQ | M3-to-M4 storage upgrade, photo/audio quota rollback/retry and restart/replay, direct uploads, gated submission, archives, lost-response retention/merge cleanup, mobile/cache/page-error checks |
 
 `tests/helpers/offline.js::MemoryStore` reuses the production pure transitions and simulates local persistence/order; it is not actual Dexie/IndexedDB. Injected network failures make scenarios deterministic. Actual browser tests close the remaining storage/lifecycle gap. The quota test deliberately overrides `IDBObjectStore.prototype.put` to throw `QuotaExceededError`; the rest of storage and the server are real. “Real infrastructure where semantics matter, controlled fault injection where timing matters” is the accurate description.
 
 ### 6.2 Isolated PostgreSQL schemas
 
-M1-M4 generate regex-validated `fieldsync_m1_<UUID without hyphens>` through `fieldsync_m4_<...>` schemas. Browser verification uses `fieldsync_m3ui_<...>`/`fieldsync_m4ui_<...>`. An admin pool creates the generated schema; a separate pool sets its search_path; the actual migrations run there. M4 also creates a separate private MinIO bucket and Redis queue prefix. Tests never flush Redis or run the orphan sweeper against the development bucket.
+M1-M5 generate regex-validated isolated schemas, including `fieldsync_m5_<UUID without hyphens>` and scoped M5 pipeline/security/restore/browser prefixes. An admin pool creates the generated schema; a separate pool sets search_path; actual migrations run there. M4/M5 also create private MinIO buckets and Redis queue prefixes. Tests never flush Redis or run the orphan sweeper against the development bucket. The restore drill additionally provisions a disposable database and another private bucket/queue target.
 
 Schema identifiers are generated/regex-validated before trusted DDL interpolation. Values still use parameterized SQL. Tests can assert real `23503` FK failures and locking/transaction behavior without touching development tables. Cleanup closes explicit M1/M2 listeners and pools, drops only the generated schema, and closes the admin pool. M3 uses Supertest's managed HTTP lifecycle around `createApp()` and closes its pools/schema in hooks.
 
@@ -924,7 +976,7 @@ The browser harness serves built assets and the actual API from one ephemeral lo
 
 It reads real IndexedDB stores to assert owner IDs, queue order, and content. It checks version/receipt outcomes in PostgreSQL, second-tab read-only/edit-lock transfer and simultaneous reconnect, stale remote recheck during merge, cross-tab offline logout, switching tenants without draining the old namespace, reauthentication, lost assignment and its return, quota failure with intact buffer, shell cache exclusion of `/api/`, zero page errors, and no overflow at 390px.
 
-The harness cleans up profile/listener/API contexts/pools/schema in `finally`, validating its generated profile path before recursive deletion. M4 additionally closes its worker/queue and removes its own private bucket/Redis keys. Playwright comes from existing `.local/qa/node_modules/playwright/index.mjs` or FIELDSYNC_PLAYWRIGHT_PATH; no project dependency was added. M3 uses an ephemeral loopback port; M4 uses the configured local APP_ORIGIN port to exercise real MinIO CORS and fails safely if that port is occupied. M4 checks atomic Blob quota failure, retained selection, photo/audio browser restart, processing-gated submission and explicit merge cleanup after controlled response loss. These focused checks do not complete M5's broader security/performance/E2E hardening.
+The harness cleans up profile/listener/API contexts/pools/schema in `finally`, validating its generated profile path before recursive deletion. M4/M5 also close workers/queues and remove their private buckets/Redis keys. Playwright comes from existing `.local/qa/node_modules/playwright/index.mjs` or FIELDSYNC_PLAYWRIGHT_PATH; no project dependency was added. M3 uses an ephemeral loopback port; M4/M5 use local APP_ORIGIN for real MinIO CORS and fail safely if that port is occupied. M5 adds explicit AI confirmation/response-loss retry, newer-device-intent merging, stale-job prevention, actual offline MediaRecorder quota/restart/replay, voice/photo fallback review, manager approval/provenance/archive, scoped analytics and mobile chart checks. These local checks do not verify cloud deployment or live model accuracy.
 
 Useful existing commands:
 
@@ -934,9 +986,12 @@ npm run test:m1
 npm run test:m2
 npm run test:m3
 npm run test:m4
+npm run test:m5
 npm run build
 npm run test:m3:browser     # build first; existing Playwright and PostgreSQL needed
 npm run test:m4:browser     # build first; all services; free local APP_ORIGIN port
+npm run test:m5:browser     # actual MediaRecorder, review/approval and analytics
+node --test tests/m5-restore.test.js  # disposable local database/object recovery
 npm run worker             # separate foreground evidence/cleanup/report process
 npm run db:migrate        # explicit application migration
 npm run check:env         # actual PostgreSQL, Redis, MinIO bucket probes
@@ -964,9 +1019,9 @@ npm run check:env         # actual PostgreSQL, Redis, MinIO bucket probes
 
 CAP reasoning should be scoped: during a network partition, FieldSync permits local draft writes, but does not pretend those writes are already globally accepted/approved. Shared synchronization later resolves conflicts under a central PostgreSQL aggregate version. That is local availability with deferred shared consistency, not an automatic theorem that every operation is AP or that the system is globally linearizable.
 
-Potential scaling work should follow measurements: list pagination/incremental pulls, index plans for searches, bounded receipt/history retention policies, query/pool contention and browser-store size. The current 80-test suite and recorded 575.51 kB JS bundle do not establish fleet throughput or latency targets.
+Potential scaling work should follow measurements: list pagination/incremental pulls, index plans for searches, bounded receipt/history retention, query/pool contention and browser-store size. The 110-test suite and largest 394.52 kB JS chunk do not establish fleet throughput. M5 measured 20 real HTTP/SQL analytics reads over 1,000 inspection rows: median 34.5 ms, p95 39.9 ms locally. Route splitting removes individual >500 kB build warnings; it does not mean the sum of all chunks is below 500 kB.
 
-### 6.6 M4 evidence/background processing and remaining M5 work
+### 6.6 M4 evidence/background processing
 
 M4 is implemented in migration 004, `packages/contracts/src/evidence.js`, server evidence/jobs/storage modules, `src/worker.js`, and browser offline/evidence UI modules:
 
@@ -981,9 +1036,21 @@ M4 is implemented in migration 004, `packages/contracts/src/evidence.js`, server
 
 Run `npm run worker` alongside the API/web process in a separate foreground terminal. API mutations retain SQL required work during Redis outages; inspections without attachments do not require a live queue to save/submit. MinIO CORS must match APP_ORIGIN and S3_PUBLIC_ENDPOINT must be browser-reachable. A deployment owns its schema/bucket; tests use isolated buckets to prevent an orphan sweep from treating development objects as missing references.
 
-M5 plans image defect suggestions, voice recording/transcription into reviewed findings, and version-linked report narratives. Original AI outputs/provenance must remain separate from human-confirmed data. Applying a suggestion must be authorized and version-checked; provider failure must not block manual inspection work. `AI_ENABLED` defaults to false, and the current API has no AI analysis endpoint. Final analytics, security/performance work, restore exercise and deployment guidance remain planned. Email verification/password reset, Mailpit, maintenance tasks, ZIP recovery, microservices and Kubernetes are explicitly excluded from the accepted scope.
+### 6.7 M5 human review, voice, analytics and readiness
 
-The explicit Render deployment gate remains: before creating, linking or deploying a backend service, stop and ask the user so they can switch their active Render account.
+`POST /inspections/:id/ai` inserts a source-bound artifact and `assist_inspection` job/receipt atomically without changing the inspection. BullMQ loads the frozen revision and verified selected bytes outside SQL transactions. The optional native-fetch adapter uses structured Responses output and multipart transcription, a combined bounded timeout and no model tools. Disabled/missing-key requests make no provider call. Provider failure/refusal/malformed output settles labeled manual/deterministic assistance; successful transcription is retained if extraction subsequently fails.
+
+`ai_artifacts.original_output/raw_output` retain originals and `sourceVersion`, provider/model/mode, prompt and request metadata. `ai_reviews.confirmed_output` holds human-edited data. Only the assigned worker can apply `confirmed=true` at the current source/base version, atomically advancing draft/version, provenance, revision, audit, review and receipt. Admins can reject and review submitted reports; they do not rewrite worker content. Stale/closed results cannot apply. Provider execution can repeat after a crash, but only the current SQL lease can commit artifact output.
+
+`AiPanel` requires synced online work, holds uncertain in-page review requests for identical retries and freezes the editor. `OfflineStore.acceptReview()` checks local generation/base before acknowledgment; newer device intent remains intact and requires the existing explicit merge. `VoiceRecorder` captures WebM/Ogg up to five minutes through actual MediaRecorder. Attach before leaving the page; M4's Blob/metadata/outbox transaction supplies durable offline storage, quota retry, browser restart and upload-before-submit. No new Dexie version or offline AI action is added.
+
+`GET /analytics` derives scope from the session: workspace for admins, current assignments for workers. A read-only repeatable-read query reports current statuses/failed checks of records created within 7/30/90 UTC days, latest-submission timing/activity, current asset counts and up to 50 asset summaries. Counts are checked safe integers. These metrics do not predict failure.
+
+The local restore test performs actual pg_dump/pg_restore into fresh targets, recovers verified MinIO bytes/headers and reconciles a report job from restored SQL into Redis. It preserves AI originals/confirmed reviews/revisions/receipts. The recorded fixture dump was 97,070 bytes and recovery work took 993 ms; this is not a production RPO/RTO. [render.yaml](./render.yaml) and the [deployment](./docs/DEPLOYMENT.md), [security](./docs/SECURITY.md) and [recovery](./docs/BACKUP_RESTORE.md) guides are locally validated readiness artifacts. They document external private HTTPS storage, private hosted services, secret inputs and the internal Render PostgreSQL self-signed TLS limitation. No Render account-linked step has occurred.
+
+Email verification/password reset, Mailpit, maintenance tasks, ZIP recovery, generated PDFs, microservices and Kubernetes remain outside scope.
+
+The explicit Render gate applies before creating, linking, configuring or deploying a backend service, and before any account-linked CLI/API step. Stop and ask the user to switch their active account and authorize continuation. Blueprint creation itself may deploy even with auto-deploy disabled.
 
 ## 7. Top 25 Likely Interview & Viva Questions
 
@@ -1037,7 +1104,7 @@ Revoked workers cannot replay old data. However, a successful submit already cha
 
 #### 12. Can typing continue while a save is in flight?
 
-Yes for saves. A later generation gets its own pending intent; the old acknowledgment advances base but cannot replace newer content. Only unattempted work can take the acknowledged version. Queued submission pauses editing. `state.js::acknowledge()` and `LocalEditor` generation guards enforce this.
+Yes for saves. A later generation gets its own pending intent; the old acknowledgment advances base but cannot replace newer content. Only unattempted work can take the acknowledged version. Submission and uncertain online AI reviews pause editing. `state.js::acknowledge()`, `LocalEditor` generation guards and M5 `acceptReview()` preserve newer intent.
 
 #### 13. Why must content and outbox writes share one IndexedDB transaction?
 
@@ -1085,16 +1152,18 @@ No. Reassignment/cancellation retain a blocked/read-only copy and queue. Expiry 
 
 #### 23. The UI says saved, but an answer disappeared after rapid typing. Where would you look?
 
-Inspect `LocalEditor`'s serialized writes, dirty/pending flags, `committedGeneration`, and incoming Dexie generation. A transaction can complete before its live-query render; accepting an older render overwrites the fast buffer. Also check ack generation versus the attempted entry. Do not solve it by indiscriminately replacing content with a server response.
+Inspect `LocalEditor`'s serialized writes, dirty/pending flags, `committedGeneration`, and incoming Dexie generation. A transaction can complete before its live-query render; accepting an older render overwrites the fast buffer. Also check acknowledgment generation versus the attempted entry. For AI review, inspect `acceptReview()`'s expected generation/base and its explicit conflict path for newer device edits. Do not solve it by indiscriminately replacing content with a server response.
 
 #### 24. The app will not reopen offline, or displays Online but never syncs. What do you inspect?
 
 Check prior production shell registration/control/cache, secure context and Web Locks support; dev mode installs no shell. For replay, inspect `fieldsync:session` flags/owner, `/auth/me`, workspace/editor/session locks, retained head status/errors, and network responses. Online is based on `navigator.onLine`, not proof the API is reachable. Never delete IndexedDB or regenerate an attempted ID as a first debugging step.
 
-#### 25. Redis is down, quota is exhausted, or integration tests fail during migrations. How do the responses differ?
+#### 25. Redis/AI is down, quota is exhausted, or migrations conflict. How do the responses differ?
 
-Redis failure makes `/health` degraded/503, but inspection services still depend on PostgreSQL rather than Redis. A device quota failure keeps the input buffer and requires successful retry before claiming a device save. Parallel suite migrations collide with node-pg-migrate's database-wide lock, so files run sequentially while writer races remain concurrent inside suites. These are distinct infrastructure, durability, and test-orchestration failures.
+Redis failure makes `/health` degraded/503; inspection writes keep SQL job intent for reconciliation. Missing/failing AI yields labeled fallback assistance and never blocks manual content. A device quota failure retains input/captured audio until a successful attachment/save. Parallel suite migrations collide with node-pg-migrate's database-wide lock, so files run sequentially while writer races remain concurrent inside suites. These are different infrastructure, provider, durability and test-orchestration failures.
 
 ### A final rehearsal exercise
 
 Using only the named files, explain one worker edit from `LocalEditor` through a committed Dexie transaction, frozen HTTP attempt, server row/receipt locks, inspection/revision/audit/receipt commit, and generation-aware local acknowledgment. Then change one assumption: lose the response, change the remote version, expire the session, switch the account, or fail the audit insert. For each, state what is durable, what is uncertain, which layer stops the operation, and which identity/version must be checked before recovery.
+
+Repeat for an AI request: trace the source revision, selected verified bytes, provider/fallback job, immutable original, human-edited confirmation and version-aware apply. Then make the source stale, lose the review response or restore into empty Redis. Explain why generation never approves findings, how original and confirmed content remain separate, and why local readiness still requires an explicit Render account-switch approval before deployment.
