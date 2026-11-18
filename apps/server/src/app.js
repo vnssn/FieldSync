@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import { z } from 'zod';
 import { HealthResponseSchema, ErrorResponseSchema } from '@fieldsync/contracts';
 import { HttpError } from './http/errors.js';
-import { createOriginGuard } from './http/security.js';
+import { createOriginGuard,createCorsGuard } from './http/security.js';
 import { createRequireAuth } from './modules/auth/middleware.js';
 import { createAuthRouter } from './modules/auth/routes.js';
 import { createUsersRouter } from './modules/users/routes.js';
@@ -44,6 +44,7 @@ export function createApp({ getHealth, logger, pool, env, storage, webDirectory 
     next();
   });
 
+  if (env) app.use('/api/v1',createCorsGuard(env));
   if (pool && env) {
     app.use('/api/v1', createOriginGuard(env));
     const requireAuth = createRequireAuth(pool);

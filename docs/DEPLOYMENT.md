@@ -1,8 +1,10 @@
 # FieldSync deployment guide
 
-The M5 deployment deliverable is the local [render.yaml](../render.yaml) and this guide. No Render service, account connection, deployment or production environment has been created or verified. **Before any Render account-linked action, stop and ask the user to switch their active account and authorize continuation.** Importing a Blueprint can create resources and start an initial deployment; `autoDeployTrigger: "off"` only disables subsequent automatic deploys.
+The frontend deployment is now Vercel at **https://fieldsync-six.vercel.app**, with the existing API at **https://fieldsync-api-t5kg.onrender.com**. See [VERCEL_RENDER_SETUP.md](VERCEL_RENDER_SETUP.md) for root-monorepo build settings, native API rewrites, cookies/CORS, security headers and the staged cutover. No second backend/database is required. The public API target is the only backend configuration in Vercel; Neon/Redis/Cloudinary secrets remain on Render.
 
-## Single-service free-tier topology
+The Vercel shell/routes/service worker/proxied health endpoint are live and verified by HTTP. Render account access is blocked by an expired CLI token; its production origin update and live Vercel browser login/evidence/offline tests are pending. **SERVE_WEB remains true until those browser checks work.** Update the existing Render service rather than importing this Blueprint. The Render topology/runtime notes below remain applicable during cutover; account-linked actions are authorized only within the user's requested existing service and free infrastructure.
+
+## Existing Render API and inline worker
 
 The Blueprint explicitly sets `plan: free` on one Node web service and private Key Value/Redis. PostgreSQL is hosted by the user's Neon Free project, not provisioned by Render. The web service serves the built React application and runs the existing BullMQ runtime in the same Node process with `RUN_INLINE_WORKER=true`. There is no separate Render background-worker service, which has no free plan. Render resources use Singapore; choose the nearest Neon region when creating the database. Review names against existing resources before import because Render can link matching names.
 
@@ -31,11 +33,12 @@ Tests simulate Cloudinary with real PostgreSQL/Redis; live provider privacy and 
 
 ## Environment inputs
 
-Provide the web service's `sync: false` inputs through Render's secret/environment UI **after approval**. The inline worker receives the same validated environment, pooled database connection, storage namespace and queue prefix as the API. No secrets belong in Git or `VITE_` variables.
+Provide the existing API service's `sync: false` inputs through Render's server environment UI as part of the authorized cutover. The inline worker receives the same validated environment, pooled database connection, storage namespace and queue prefix as the API. No secrets belong in Git or `VITE_` variables.
 
 | Input | Required value |
 | --- | --- |
 | `APP_ORIGIN` | Exact final HTTPS browser origin, such as `https://fieldsync.example.com`; no path. No trailing slash, credentials, query or fragment. Set it in Render before startup; build does not require it. Use the same origin for UI, cookies, CSRF and microphone permissions. Cloudinary uploads require no storage CORS. An existing local browser cache belongs to its old origin. |
+| `ADDITIONAL_APP_ORIGINS` | Exact comma-separated extra browser origins (maximum five). During acceptance, keep the existing primary origin and allow `https://fieldsync-six.vercel.app`; no wildcard/preview suffixes. After acceptance, promote Vercel to `APP_ORIGIN` and retire unused origins. |
 | `DATABASE_URL` | Neon pooled connection URL (host includes `-pooler`) for app and worker queries. |
 | `MIGRATIONS_DATABASE_URL` | Neon direct/unpooled connection URL for `db:migrate`. Must target the same project, branch, database and role as `DATABASE_URL`; do not use the `-pooler` hostname. |
 | `POSTGRES_SSL` | Blueprint sets `true`. The app uses TLS with certificate verification; keep the Neon hostname and `sslmode=require` query in the copied URL. Do not disable certificate verification or use `NODE_TLS_REJECT_UNAUTHORIZED=0`. |
@@ -78,9 +81,9 @@ jsonschema.validate(blueprint, schema)
 print("Local Blueprint schema validation passed")
 ```
 
-## Release sequence after account-switch approval
+## Existing Render service release sequence
 
-1. Confirm the target free Hobby workspace, repository, resource names, region, origin, Neon URLs, Cloudinary authenticated raw capability, credentials and a dedicated namespace and recovery destination. Verify the Render web and Key Value services are Free and no payment method is needed. Keep automatic deploys disabled. Creating/linking the Blueprint is itself a gated action.
+1. Confirm the target free Hobby workspace, repository, resource names, region, origin, Neon URLs, Cloudinary authenticated raw capability, credentials and a dedicated namespace and recovery destination. Verify the Render web and Key Value services are Free and no payment method is needed. Keep automatic deploys disabled. Do not create/link a replacement Blueprint for this cutover.
 2. The web service builds with `npm ci --include=dev && npm run build`. Free web services do not support `preDeployCommand`, so its start command is `npm run db:migrate && npm run start --workspace=@fieldsync/server`. Migrations use the direct Neon URL while application requests use the pooled URL. Ordered migrations 001–005 run transactionally under the existing migration lock on every start and become no-ops when current. A migration failure prevents both the listener and worker from starting. Application code itself does not migrate automatically.
 3. Push tested Cloudinary support before any deployment. Validate the dedicated Cloudinary namespace before release, including anonymous staging/verified access denial and confirmed deletion. Confirm the web logs show both `FieldSync API listening` and `FieldSync inline background worker started`, then verify actual job completion. There is no second service to deploy or restart. Start/restart of the web process starts/restarts the worker too.
 4. Check `/api/v1/health`, then perform register/login, tenant isolation, real constrained evidence upload, verification, manual submit/approve, archive, microphone/offline replay and analytics smoke checks. Free services have no Render shell/SSH or one-off jobs: any approved administration or `check:env` must run from a separate trusted machine with appropriately allowlisted, verified-TLS public datastore connections. Health probes PostgreSQL/Redis; `check:env` also checks the selected storage provider (authenticated raw Admin API listing for Cloudinary). Neither replaces real private upload/download/delete checks or proves worker liveness. Record actual cloud observations separately from local results.

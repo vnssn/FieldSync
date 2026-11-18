@@ -91,7 +91,7 @@ export function createEvidenceService(pool, storage, logger) {
         return { body:publicEvidence(result.rows[0]),inspectionId };
       });
     },
-    async upload(auth, inspectionId, id) {
+    async upload(auth, inspectionId, id, origin) {
       assertWorker(auth);
       const row = await transaction(pool,async (db) => {
         assertEditable(await access(db,auth,inspectionId,true));
@@ -108,7 +108,7 @@ export function createEvidenceService(pool, storage, logger) {
         }
         return current;
       });
-      return storage.presign(row);
+      return storage.presign(row,{ origin });
     },
     async uploadContent(auth, inspectionId, id, uploadId, request) {
       assertWorker(auth);

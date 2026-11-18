@@ -15,7 +15,7 @@ const optionalString = (schema) => z.preprocess((value) => value === '' ? undefi
 const connectionUrl = (protocols) => z.url().refine((value) => { try { return protocols.includes(new URL(value).protocol); } catch { return false; } },'Use a supported connection URL.');
 
 const originUrl = httpUrl.refine((value) => {
-  try { return new URL(value).origin === value; } catch { return false; }
+  try { const url = new URL(value); return url.origin === value && !url.hostname.includes('*'); } catch { return false; }
 }, 'Use an exact browser origin without credentials, path, query or fragment.');
 
 export const EnvironmentSchema = z.preprocess((input) => {
@@ -29,6 +29,8 @@ export const EnvironmentSchema = z.preprocess((input) => {
   API_PORT: port.default(3000),
   WEB_PORT: port.default(5173),
   APP_ORIGIN: originUrl.default('http://localhost:5173'),
+  ADDITIONAL_APP_ORIGINS: z.string().default('').transform((value) => value ? value.split(',').map((origin) => origin.trim()) : [])
+    .pipe(z.array(originUrl).max(5)),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace', 'silent']).default('info'),
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(168),
   SERVE_WEB: booleanString.prefault('false'),
@@ -101,6 +103,9 @@ export const EnvironmentSchema = z.preprocess((input) => {
   }
   if (value.NODE_ENV === 'production' && !value.APP_ORIGIN.startsWith('https://')) {
     context.addIssue({ code: 'custom', path: ['APP_ORIGIN'], message: 'Production requires HTTPS.' });
+  }
+  if (value.NODE_ENV === 'production' && value.ADDITIONAL_APP_ORIGINS.some((origin) => !origin.startsWith('https://'))) {
+    context.addIssue({ code:'custom',path:['ADDITIONAL_APP_ORIGINS'],message:'Production application origins require HTTPS.' });
   }
   if (value.NODE_ENV === 'production' && value.EVIDENCE_STORAGE_PROVIDER === 's3' && (!value.S3_ENDPOINT.startsWith('https://') || !value.S3_PUBLIC_ENDPOINT.startsWith('https://'))) {
     context.addIssue({ code:'custom',path:['S3_ENDPOINT'],message:'Production storage requires HTTPS.' });

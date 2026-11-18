@@ -1,0 +1,17 @@
+.env
+.env.*
+!.env.example
+.local/
+.agents/
+.codex/
+.vercel/
+.neon
+neon.ts
+skills-lock.json
+node_modules/
+.git/
+**/dist/
+*.log
+coverage/
+test-results/
+playwright-report/

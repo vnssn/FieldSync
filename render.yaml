@@ -1,6 +1,6 @@
-# Local deployment blueprint only. Do not import, link or apply this file until
-# the user has switched Render accounts and explicitly authorized deployment.
-# Blueprint creation starts an initial deployment even with auto-deploy off.
+# Existing Render API/Redis topology. Update the existing service during cutover;
+# do not import this Blueprint to create a second backend or database.
+# Keep frontend serving enabled until Vercel passes live browser acceptance.
 services:
   - type: web
     name: fieldsync-api
@@ -29,6 +29,8 @@ services:
       - key: TRUST_PROXY_HOPS
         value: "1"
       - key: APP_ORIGIN
+        sync: false
+      - key: ADDITIONAL_APP_ORIGINS
         sync: false
       - key: LOG_LEVEL
         value: info

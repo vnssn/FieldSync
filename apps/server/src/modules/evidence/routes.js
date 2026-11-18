@@ -12,7 +12,7 @@ export function createEvidenceRouter({ pool,storage,logger,requireAuth }) {
   router.post('/:id/evidence/reserve',async (req,res) => res.status(201).json(evidenceSchema.parse(await service.reserve(req.auth,id(req),parseRequest(reserveEvidenceSchema,req.body)))));
   router.post('/:id/evidence/:evidenceId/upload',async (req,res) => {
     const params = parseRequest(evidenceParamsSchema,req.params); parseRequest(emptyRequestSchema,req.body);
-    res.json(uploadResponseSchema.parse(await service.upload(req.auth,params.id,params.evidenceId)));
+    res.json(uploadResponseSchema.parse(await service.upload(req.auth,params.id,params.evidenceId,req.get('origin'))));
   });
   router.put('/:id/evidence/:evidenceId/content/:uploadId',async (req,res) => {
     const params = parseRequest(evidenceContentParamsSchema,req.params);

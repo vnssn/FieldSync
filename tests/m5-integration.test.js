@@ -217,7 +217,10 @@ test('M5 actual BullMQ delivers AI jobs, deduplicates redelivery and preserves q
     await runtime.worker.pause();
     const pendingRow=await f.fresh(),pending=await f.request(pendingRow),job=await f.job(pending);
     await runtime.reconcile(); const entry=await runtime.queue.getJob(job.id); if(entry) await entry.remove();
-    await runtime.reconcile(); assert.ok(await runtime.queue.getJob(job.id)); await runtime.worker.resume();
+    // A timer-driven reconciliation may already be running; the explicit call
+    // then returns without starting a second pass. Wait for durable republishing.
+    await poll(async()=>{ await runtime.reconcile(); return await runtime.queue.getJob(job.id); },'re-published AI job');
+    await runtime.worker.resume();
     await poll(async()=> (await f.artifact(pendingRow,pending.id)).status==='ready','reconciled AI job');
   });
 });

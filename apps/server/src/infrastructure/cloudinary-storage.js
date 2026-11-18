@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { uploadResponseSchema } from '@fieldsync/contracts';
 import { assertEvidenceKey, evidencePrefix, readEvidenceBytes, validateEvidenceBytes } from './storage.js';
 import { HttpError } from '../http/errors.js';
+import { applicationOrigins } from '../http/security.js';
 
 const keySchema = z.string().regex(/^org\/[a-f0-9-]{36}\/inspections\/[a-f0-9-]{36}\/[a-f0-9-]{36}\/(staging|verified)\/[a-f0-9-]{36}$/);
 function assertKey(key) {
@@ -35,11 +36,12 @@ export function createCloudinaryStorage(env, sdk = cloudinary, fetchFile = fetch
     async verify() {
       await sdk.api.resources({ ...options,prefix:`${namespace}org/`,max_results:1 });
     },
-    async presign(row) {
+    async presign(row,{ origin = env.APP_ORIGIN } = {}) {
+      if (!applicationOrigins(env).has(origin)) throw new HttpError(403,'INVALID_ORIGIN','This request must come from an allowed application origin.');
       assertEvidenceKey(row,row.staging_key,'staging');
       const expiresAt = new Date(Math.min(Date.now()+600000,row.expires_at.getTime()));
       if (expiresAt <= new Date()) throw new HttpError(410,'UPLOAD_EXPIRED','This staging upload expired. Request a new upload.');
-      return uploadResponseSchema.parse({ transport:'server',url:`${env.APP_ORIGIN}/api/v1/inspections/${row.inspection_id}/evidence/${row.id}/content/${row.staging_key.split('/').at(-1)}`,
+      return uploadResponseSchema.parse({ transport:'server',url:`${origin}/api/v1/inspections/${row.inspection_id}/evidence/${row.id}/content/${row.staging_key.split('/').at(-1)}`,
         method:'PUT',headers:{ 'Content-Type':row.mime_type,'x-amz-meta-sha256':row.sha256 },size:row.size,expiresAt:expiresAt.toISOString() });
     },
     async upload(row,bytes) {

@@ -12,7 +12,7 @@ This repository implements M0-M5: local infrastructure, sessions, tenant-isolate
 
 ## Free local demo and quick start
 
-You can demo the complete project locally without cloud accounts. Docker Compose runs PostgreSQL, Redis, and MinIO; AI is disabled by default. The Render blueprint selects Cloudinary for private evidence storage with authenticated server uploads and downloads. Neon retains pooled application connections and direct migration connections. See [deployment](docs/DEPLOYMENT.md) and [Cloudinary setup](docs/CLOUDINARY_SETUP.md). The S3 adapter remains available for local MinIO and existing S3 deployments.
+You can demo the complete project locally without cloud accounts. Docker Compose runs PostgreSQL, Redis, and MinIO; AI is disabled by default. The frontend is deployed at https://fieldsync-six.vercel.app and uses the existing Render API through a native Vercel rewrite. Render origin setup and live browser acceptance are pending; its original frontend remains available. The Render blueprint retains Cloudinary for private evidence storage with authenticated server uploads and downloads. Neon retains pooled application connections and direct migration connections. See [deployment](docs/DEPLOYMENT.md) and [Cloudinary setup](docs/CLOUDINARY_SETUP.md). The S3 adapter remains available for local MinIO and existing S3 deployments.
 
 Use Node.js >=22.12 and Docker Desktop with Linux containers. In PowerShell:
 
@@ -40,14 +40,16 @@ Email verification/password reset, Mailpit, maintenance tasks, generated PDFs an
 
 npm run infra:down preserves named data volumes.
 
-The 119 automated tests include real PostgreSQL/MinIO/Redis/BullMQ integration, pure offline transitions and clearly labeled local provider HTTP simulations. M5 adds 30 tests, including a real pg_dump/pg_restore plus object/job recovery exercise; later checks cover inline-worker lifecycle and R2-compatible PUT contracts. All three local services must be running; credentials must permit isolated schema/bucket creation and cleanup, and the restore drill needs local Compose PostgreSQL with permission to create a disposable database. Tests close temporary listeners/pools/workers and remove only their generated targets.
+The automated tests include real PostgreSQL/MinIO/Redis/BullMQ integration, pure offline transitions and clearly labeled local provider HTTP simulations. M5 adds 30 tests, including a real pg_dump/pg_restore plus object/job recovery exercise; later checks cover inline-worker lifecycle and R2-compatible PUT contracts. All three local services must be running; credentials must permit isolated schema/bucket creation and cleanup, and the restore drill needs local Compose PostgreSQL with permission to create a disposable database. Tests close temporary listeners/pools/workers and remove only their generated targets.
 
 `npm run test:m3:browser`, `npm run test:m4:browser` and `npm run test:m5:browser` exercise built assets with actual IndexedDB using existing local Playwright. Build first. M4/M5 use the configured local APP_ORIGIN port for MinIO CORS; that port must be free. Prerequisites and recorded results are in [IMPLEMENTATION.md](IMPLEMENTATION.md). `npm run test:m5` runs the M5 suite alone; `node --test tests/m5-restore.test.js` repeats the disposable recovery drill.
 
 Open assigned work online before going into the field. Worker edits are saved on this device and synchronized on reconnect, focus or interval. Conflicts retain local work for review; expired sessions pause sync until sign-in. A previously cached production shell supports offline browser reopening on HTTPS or loopback; development mode does not install a service worker. Assets and admin operations remain online.
 
-## Deployment gate
+## Hosted deployment
 
-[render.yaml](render.yaml) is a locally validated readiness file. **Do not create, link, configure or deploy any Render backend service until the user switches their active Render account and authorizes continuation.** Blueprint import itself can trigger an initial deployment even with automatic deploys disabled. No Render account-linked step has been performed, and local tests do not establish cloud readiness or live AI quality.
+[render.yaml](render.yaml) describes the existing API and Redis topology. Update the existing Render service during cutover; importing a new Blueprint can create duplicate resources. The Vercel frontend is live, while the Render origin update and live browser acceptance await refreshed Render access. Keep Render frontend serving enabled until Vercel login, evidence and offline checks pass. Local tests do not establish live Cloudinary capabilities or browser session persistence.
 
 Cloudinary regressions: `npm run test:cloudinary` and, after building with the existing local browser prerequisites, `npm run test:cloudinary:browser`. The provider is simulated; tests do not upload to a live Cloudinary account.
+
+See [Vercel/Render deployment](docs/VERCEL_RENDER_SETUP.md) for monorepo configuration, first-party session routing, exact-origin CORS, cutover acceptance and current deployment status. `npm run test:hosting` runs the local routing/auth/CORS/Cloudinary origin regressions.
