@@ -4,7 +4,7 @@
 
 M0-M5 are complete and locally verified. M0 was originally verified on 2026-11-15, M1-M3 on 2026-11-16, and M4-M5 on 2026-11-17. Final M5 verification includes 110 passing automated tests, the production build, real PostgreSQL/Redis/MinIO/restore and all M3/M4/M5 browser checks. INTERVIEW.md is refreshed through M5. Code/docs/configuration changes are uncommitted; no Render account-linked action or paid AI call has occurred.
 
-The remaining step is the user's Render account switch and explicit authorization before creating, linking, configuring or deploying services. The local Blueprint/guides are ready; deployment and cloud smoke/recovery checks have not been executed.
+The 2026-11-18 update changes the local Blueprint to three explicit Free plans and runs BullMQ inside the web service with `RUN_INLINE_WORKER=true`; verification now passes 114 tests and the production build. Free PostgreSQL expires after 30 days, idle shutdown pauses background work, and compatible external private object storage is still required. The remaining step is the user's Render account switch and explicit authorization before creating, linking, configuring or deploying services. Deployment and cloud smoke/recovery checks have not been executed.
 
 The verification results below were captured against the real local services. Verification closes its temporary listeners and preserves user-started processes; do not start background dev servers automatically. Run npm run dev in a foreground terminal only when requested.
 
@@ -91,7 +91,7 @@ Open http://localhost:5173 and register an organization. The shell exposes its o
     npm run infra:down          # Remove containers/network; KEEP volumes
     npm run check:env           # Real PostgreSQL, Redis and S3 checks
     npm run db:migrate          # Apply JavaScript PostgreSQL migrations
-    npm test                    # 110 tests; real infrastructure + pure/provider-boundary cases
+    npm test                    # 114 tests; real infrastructure + pure/provider-boundary cases
     npm run test:m1             # M1 PostgreSQL integration tests only
     npm run test:m2             # M2 PostgreSQL integration tests only
     npm run test:m3             # M3 core sync and PostgreSQL replay tests
@@ -100,7 +100,7 @@ Open http://localhost:5173 and register an organization. The shell exposes its o
     npm run test:m4:browser     # Built client, actual Dexie blobs and direct MinIO uploads
     npm run test:m5             # M5 integration, provider, security and restore tests
     npm run test:m5:browser     # Voice/review/approval/analytics E2E; built client + real services
-    npm run worker              # Evidence/cleanup/report/AI worker; separate foreground terminal
+    npm run worker              # Standalone worker locally, with RUN_INLINE_WORKER=false
     npm run build               # Production web build
     docker compose ps           # Container health/state
     docker compose logs -f      # Follow service logs
@@ -115,7 +115,7 @@ Do not use volume deletion as an ordinary reset. Password changes in .env do not
 
 The root .env is loaded explicitly by server/scripts. Vite uses the root env directory but only exposes VITE_-prefixed values to browser code. The frontend makes relative /api requests and never receives database, Redis or S3 credentials.
 
-M5 accepts hosting DATABASE_URL/REDIS_URL, verified external PostgreSQL TLS through POSTGRES_SSL=true and verified Redis TLS through rediss://. Production requires HTTPS APP_ORIGIN and S3 endpoints. SERVE_WEB=true serves the production client on the API origin. AI_ENABLED=false remains the default; an optional server-only OPENAI_API_KEY enables provider calls, with labeled fallback on missing keys/failure. Limits/models/timeouts are in .env.example. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for secret inputs, storage CORS, internal Render PostgreSQL TLS limits and the mandatory account-switch gate.
+M5 accepts hosting DATABASE_URL/REDIS_URL, verified external PostgreSQL TLS through POSTGRES_SSL=true and verified Redis TLS through rediss://. Production requires HTTPS APP_ORIGIN and S3 endpoints. SERVE_WEB=true serves the production client on the API origin. RUN_INLINE_WORKER defaults to false locally; the Render Blueprint sets it to true to run BullMQ in the same process with a shared pool/storage and graceful shutdown. AI_ENABLED=false remains the default; an optional server-only OPENAI_API_KEY enables provider calls, with labeled fallback on missing keys/failure. Limits/models/timeouts are in .env.example. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for free-tier limits, secret inputs, storage CORS, internal Render PostgreSQL TLS limits and the mandatory account-switch gate.
 
 AI_ENABLED=false is parsed as a Boolean false, not JavaScript's truthy string value.
 
@@ -146,6 +146,21 @@ node-pg-migrate is pinned to 7.6.1; the tested installation reports zero npm aud
 7. npm test and npm run build succeed.
 8. Source contains no .ts/.tsx/tsconfig files or TypeScript tooling.
 9. Run M3/M4/M5 browser regressions, including offline recording, explicit assistance review, analytics/mobile/cache checks; record measured local performance.
+
+## Free-tier configuration actual verification — 2026-11-18
+
+Updated `render.yaml` to explicit `plan: free` on the web service, PostgreSQL and Key Value/Redis, removed the separate worker and custom paid database disk size, and replaced the unsupported free-service pre-deploy hook with `npm run db:migrate && npm run start --workspace=@fieldsync/server`. `RUN_INLINE_WORKER=true` starts the existing BullMQ runtime inside the web process, sharing PostgreSQL/storage. The validated flag defaults to false locally. SIGTERM/SIGINT drain HTTP/jobs before closing shared resources under one ten-second deadline; listener startup failure follows the same cleanup with a failing exit code.
+
+The initial test attempt encountered unavailable local PostgreSQL while Docker was stopped. After Docker became available and the three existing services were healthy, verification ran against real PostgreSQL/Redis/MinIO. An overly specific closed-pool error assertion in the new tests was corrected before the final full rerun.
+
+- `npm test` exited 0: **114 tests, 114 passed, zero failed/skipped/cancelled**. The existing 110 cases pass; four new server-runtime cases cover health with inline work disabled, actual BullMQ evidence-job draining through both SIGTERM/SIGINT handlers, repeated-shutdown idempotency and listener-startup-error cleanup. The foundation test also validates the flag's default, true value and rejection of invalid strings.
+- `npm run build` exited 0: **203 modules**, largest JS chunk **394.52 kB (124.29 kB gzip)**, with no individual >500 kB advisory.
+- Local PyYAML/jsonschema validation passed against the cached official Render JSON schema. Additional checks confirm exactly three Free resources, one web instance, no worker/pre-deploy/custom-disk configuration, inline work enabled, AI disabled, private datastore allowlists and consistent references/region. Validation libraries/scripts live only in ignored `.local`; no application dependency or lockfile changed.
+- `git diff --check` passed. Browser harnesses were not rerun for this server/configuration update; their M5 results below remain historical.
+
+Refreshed [DEPLOYMENT.md](./docs/DEPLOYMENT.md), [INTERVIEW.md](./INTERVIEW.md), [EGM.md](./EGM.md), [CONTEXT.md](./CONTEXT.md), `.env.example` and this checklist. The guides explain cardless Free/Hobby deployment, start-command migrations, shared-process shutdown, idle/cold-start job delays, memory-only Redis recovery, 1 GB/30-day PostgreSQL and included usage limits. Full evidence/voice workflows still require separately provisioned private HTTPS S3-compatible storage; its compatible free/cardless availability is unverified. A permanent, entirely Render-hosted M0-M5 stack at $0 is not claimed.
+
+Final logs are ignored at `.local/free-tier-test.log` and `.local/free-tier-build.log`. No Render CLI, account-linked validation, resource creation, account connection or deployment command was run. **STOP before any Render account-linked continuation.**
 
 ## M5 actual verification results — 2026-11-17
 
@@ -184,7 +199,7 @@ Final read-only cleanup audit found **zero** leftover test schemas, restore data
 
 ### Exactly what remains next
 
-No additional M0-M5 local application code is required. **STOP before any Render account-linked step**: the user must switch to the intended active Render account and authorize creation/linking/configuration/deployment. After that approval, follow the deployment guide to review names/region/costs and storage policy, fill secrets, provision/link the planned services, migrate the API before worker readiness, and record actual cloud smoke and backup/recovery checks. AI provider activation/quality evaluation is optional and remains unverified; manual/fallback workflows are complete.
+The local free-tier update is complete. **STOP before any Render account-linked step**: the user must switch to the intended active Render account and authorize creation/linking/configuration/deployment. After that approval, follow the deployment guide to review names/region/free limits and compatible external storage, fill secrets, provision/link the three Free resources, let the start command migrate before the API/inline worker starts, and record actual cloud smoke and backup/recovery checks before PostgreSQL expiration. AI provider activation/quality evaluation is optional and remains unverified; manual/fallback workflows are complete.
 
 ## M4 actual verification results — 2026-11-17
 

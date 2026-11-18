@@ -1,6 +1,6 @@
 # FieldSync: Interview and Project Viva Study Guide
 
-Source snapshot: M0-M5, refreshed on 2026-11-17. Final verification is recorded in [IMPLEMENTATION.md](./IMPLEMENTATION.md). Read this alongside [EGM.md](./EGM.md) and [CONTEXT.md](./CONTEXT.md). Paths below are relative to the repository root; function names identify actual implementations rather than hypothetical components. Render deployment remains gated on the user's active-account switch and approval.
+Source snapshot: M0-M5, refreshed on 2026-11-18 for the single-service Render free-tier configuration. Final verification is recorded in [IMPLEMENTATION.md](./IMPLEMENTATION.md). Read this alongside [EGM.md](./EGM.md) and [CONTEXT.md](./CONTEXT.md). Paths below are relative to the repository root; function names identify actual implementations rather than hypothetical components. Render deployment remains gated on the user's active-account switch and approval.
 
 Three corrections to remember before an interview:
 
@@ -99,7 +99,7 @@ Root `package.json` declares `apps/web`, `apps/server`, and `packages/contracts`
 | Shared infrastructure | `apps/server/src/infrastructure/{transaction,mutations,audit,database,migrations}.js` | Transaction boundaries, replay protocol, audit operations, pool and migration configuration |
 | Web composition | `apps/web/src/main.jsx`, `App.jsx`, `auth.jsx`, `query-client.js` | Providers, role/session guards, routing, online query behavior |
 | Offline worker | `apps/web/src/offline/{state,store,sync,session,evidence}.js`, `provider.jsx`; `apps/web/src/pages/WorkerInspections.jsx` | Local transitions/blobs, upload replay, identity coordination, worker UI |
-| Background runtime | `apps/server/src/worker.js`, `modules/jobs/{repository,worker}.js`, `infrastructure/storage.js` | Durable job insertion, fenced claims/outcomes, Redis scheduling, storage verification/cleanup and HTML archives |
+| Background runtime | `apps/server/src/server.js`, `src/worker.js`, `modules/jobs/{repository,worker}.js`, `infrastructure/storage.js` | Inline or standalone BullMQ runtime, durable job insertion, fenced claims/outcomes, Redis scheduling, storage verification/cleanup and HTML archives |
 | Assistance / analytics | `modules/ai/{provider,repository,service,routes}.js`, `modules/analytics/{service,routes}.js`; web `ai-ui.jsx`, `VoiceRecorder.jsx`, `DashboardPage.jsx` | Source-bound suggestions, explicit reviews, offline audio capture and tenant/assignment-scoped aggregates |
 | Deployment / recovery | `render.yaml`, `docs/{DEPLOYMENT,SECURITY,BACKUP_RESTORE}.md` | Local hosting blueprint, secret/network policy, recovery procedure and mandatory Render account-switch gate |
 
@@ -1034,7 +1034,7 @@ M4 is implemented in migration 004, `packages/contracts/src/evidence.js`, server
 - PostgreSQL jobs are durable work/outcomes; BullMQ schedules at least once. Five attempts, sixty-second fenced leases, fifteen-second heartbeats, bounded queue-command retries and five-second reconciliation recover lost delivery and process crashes. Final exhausted crash leases also mark attached evidence failed. Age-based cleanup retains live staging and attached objects.
 - `prepare_report` reads the saved revision and validates organization/inspection/sourceVersion. It produces escaped manual HTML and a summary, served through a scoped sandboxed archive route. This is asynchronous report preparation without AI or PDF generation.
 
-Run `npm run worker` alongside the API/web process in a separate foreground terminal. API mutations retain SQL required work during Redis outages; inspections without attachments do not require a live queue to save/submit. MinIO CORS must match APP_ORIGIN and S3_PUBLIC_ENDPOINT must be browser-reachable. A deployment owns its schema/bucket; tests use isolated buckets to prevent an orphan sweep from treating development objects as missing references.
+For local development, `RUN_INLINE_WORKER` defaults to false; run `npm run worker` alongside the API/web process in a separate foreground terminal. The free-tier Render Blueprint sets it to true, so `server.js` starts the same `createJobRuntime()` inside the API process, sharing its environment, PostgreSQL pool and storage. API mutations retain SQL required work during Redis outages; inspections without attachments do not require a live queue to save/submit. MinIO CORS must match APP_ORIGIN and S3_PUBLIC_ENDPOINT must be browser-reachable. A deployment owns its schema/bucket; tests use isolated buckets to prevent an orphan sweep from treating development objects as missing references.
 
 ### 6.7 M5 human review, voice, analytics and readiness
 
@@ -1051,6 +1051,18 @@ The local restore test performs actual pg_dump/pg_restore into fresh targets, re
 Email verification/password reset, Mailpit, maintenance tasks, ZIP recovery, generated PDFs, microservices and Kubernetes remain outside scope.
 
 The explicit Render gate applies before creating, linking, configuring or deploying a backend service, and before any account-linked CLI/API step. Stop and ask the user to switch their active account and authorize continuation. Blueprint creation itself may deploy even with auto-deploy disabled.
+
+### 6.8 Why a single Render web service on the free tier?
+
+`render.yaml` selects `plan: free` for the Node web service, PostgreSQL 17 and private Key Value/Redis. Render has no free background-worker service, so `RUN_INLINE_WORKER=true` runs BullMQ inside the web process that also serves React and the API. The local standalone worker remains available with the flag false. The Render setup uses a free Hobby workspace without a credit card/payment details, no persistent disk and disabled paid AI calls; no account-linked deployment has been performed.
+
+Free web services have no pre-deploy command or shell/one-off jobs. The build remains `npm ci --include=dev && npm run build`; the start command is `npm run db:migrate && npm run start --workspace=@fieldsync/server`. Transactional, locked migrations rerun safely as no-ops on restart, and a migration failure prevents both API and worker startup. `server.js` itself does not run migrations.
+
+`server.js::startServer()` owns the listener and optional runtime. SIGTERM/SIGINT trigger one idempotent shutdown: stop accepting requests, close BullMQ/reconciliation/Redis, drain active HTTP requests and jobs, then destroy shared storage and close PostgreSQL. One ten-second deadline bounds the process; interrupted jobs recover through SQL leases on the next start. Listener startup failure follows the same cleanup with a failing exit code.
+
+The trade-off is delayed background work and shared memory/CPU. Render spins the free web service down after 15 idle minutes; jobs wait until an HTTP request wakes it. Free Key Value loses all state on restart, so SQL job intent and reconciliation matter. Free PostgreSQL is limited to 1 GB and expires after 30 days, with no managed backups; export before expiration and prepare a fresh demo database/restore. A workspace supports only one free database and one free Key Value instance, and its 750 monthly free web hours plus bandwidth/build allowances constrain availability without payment details.
+
+Evidence still requires separately provisioned private HTTPS S3-compatible storage with constrained POST and conditional object writes. That provider must independently be compatible, free and cardless for the full demo to cost $0. This Blueprint alone cannot host every M0-M5 feature entirely on Render's free tier or keep the database available indefinitely. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for lifecycle, secrets, release and backup details.
 
 ## 7. Top 25 Likely Interview & Viva Questions
 

@@ -6,12 +6,12 @@ services:
     name: fieldsync-api
     runtime: node
     region: singapore
-    plan: 0.5c-512mb
+    plan: free
     numInstances: 1
     autoDeployTrigger: "off"
     buildCommand: npm ci --include=dev && npm run build
-    preDeployCommand: npm run db:migrate
-    startCommand: npm run start --workspace=@fieldsync/server
+    # Free web services have no pre-deploy hook. Migrate before either runtime starts.
+    startCommand: npm run db:migrate && npm run start --workspace=@fieldsync/server
     healthCheckPath: /api/v1/health
     envVars:
       - key: NODE_VERSION
@@ -23,6 +23,8 @@ services:
       - key: API_PORT
         value: "10000"
       - key: SERVE_WEB
+        value: "true"
+      - key: RUN_INLINE_WORKER
         value: "true"
       - key: TRUST_PROXY_HOPS
         value: "1"
@@ -73,70 +75,18 @@ services:
       - key: AI_MAX_PER_HOUR
         value: "20"
 
-  - type: worker
-    name: fieldsync-worker
-    runtime: node
-    region: singapore
-    plan: 0.5c-512mb
-    numInstances: 1
-    autoDeployTrigger: "off"
-    buildCommand: npm ci --omit=dev
-    startCommand: npm run worker
-    envVars:
-      - key: NODE_VERSION
-        fromService: { name: fieldsync-api, type: web, envVarKey: NODE_VERSION }
-      - key: NODE_ENV
-        value: production
-      - key: APP_ORIGIN
-        fromService: { name: fieldsync-api, type: web, envVarKey: APP_ORIGIN }
-      - key: LOG_LEVEL
-        fromService: { name: fieldsync-api, type: web, envVarKey: LOG_LEVEL }
-      - key: DATABASE_URL
-        fromDatabase: { name: fieldsync-db, property: connectionString }
-      - key: POSTGRES_SSL
-        fromService: { name: fieldsync-api, type: web, envVarKey: POSTGRES_SSL }
-      - key: REDIS_URL
-        fromService: { name: fieldsync-queue, type: keyvalue, property: connectionString }
-      - key: QUEUE_PREFIX
-        fromService: { name: fieldsync-api, type: web, envVarKey: QUEUE_PREFIX }
-      - key: S3_ENDPOINT
-        fromService: { name: fieldsync-api, type: web, envVarKey: S3_ENDPOINT }
-      - key: S3_PUBLIC_ENDPOINT
-        fromService: { name: fieldsync-api, type: web, envVarKey: S3_PUBLIC_ENDPOINT }
-      - key: S3_REGION
-        fromService: { name: fieldsync-api, type: web, envVarKey: S3_REGION }
-      - key: S3_BUCKET
-        fromService: { name: fieldsync-api, type: web, envVarKey: S3_BUCKET }
-      - key: S3_ACCESS_KEY_ID
-        fromService: { name: fieldsync-api, type: web, envVarKey: S3_ACCESS_KEY_ID }
-      - key: S3_SECRET_ACCESS_KEY
-        fromService: { name: fieldsync-api, type: web, envVarKey: S3_SECRET_ACCESS_KEY }
-      - key: S3_FORCE_PATH_STYLE
-        fromService: { name: fieldsync-api, type: web, envVarKey: S3_FORCE_PATH_STYLE }
-      - key: AI_ENABLED
-        fromService: { name: fieldsync-api, type: web, envVarKey: AI_ENABLED }
-      - key: OPENAI_API_KEY
-        fromService: { name: fieldsync-api, type: web, envVarKey: OPENAI_API_KEY }
-      - key: OPENAI_MODEL
-        fromService: { name: fieldsync-api, type: web, envVarKey: OPENAI_MODEL }
-      - key: OPENAI_TRANSCRIPTION_MODEL
-        fromService: { name: fieldsync-api, type: web, envVarKey: OPENAI_TRANSCRIPTION_MODEL }
-      - key: AI_TIMEOUT_MS
-        fromService: { name: fieldsync-api, type: web, envVarKey: AI_TIMEOUT_MS }
-
   - type: keyvalue
     name: fieldsync-queue
     region: singapore
-    plan: 256mb
+    plan: free
     maxmemoryPolicy: noeviction
     ipAllowList: []
 
 databases:
   - name: fieldsync-db
     region: singapore
-    plan: 0.5c-1g
+    plan: free
     postgresMajorVersion: "17"
     databaseName: fieldsync
     user: fieldsync
-    diskSizeGB: 5
     ipAllowList: []

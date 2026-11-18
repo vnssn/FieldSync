@@ -34,8 +34,11 @@ test('environment parses false as false and validates numeric ports', () => {
   assert.equal(env.AI_ENABLED, false);
   assert.equal(env.API_PORT, 3000);
   assert.equal(env.S3_FORCE_PATH_STYLE, true);
+  assert.equal(env.RUN_INLINE_WORKER, false);
+  assert.equal(EnvironmentSchema.parse({ ...minimumEnv, RUN_INLINE_WORKER: 'true' }).RUN_INLINE_WORKER, true);
   assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, API_PORT: '0' }).success, false);
   assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, AI_ENABLED: 'yes' }).success, false);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, RUN_INLINE_WORKER: 'yes' }).success, false);
 });
 
 test('environment rejects invalid URLs without throwing outside Zod', () => {
