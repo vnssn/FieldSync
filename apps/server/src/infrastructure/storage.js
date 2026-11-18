@@ -4,6 +4,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { uploadResponseSchema, EVIDENCE_LIMITS } from '@fieldsync/contracts';
 import { HttpError } from '../http/errors.js';
+import { createCloudinaryStorage } from './cloudinary-storage.js';
 
 export function createStorageClient(env) {
   return new S3Client({
@@ -72,7 +73,40 @@ export function matchesSignature(bytes, mime) {
   }
 }
 
-export function createEvidenceStorage(env, client = createStorageClient(env)) {
+export function validateEvidenceBytes(bytes, expected) {
+  const limit = EVIDENCE_LIMITS[expected.mime_type.startsWith('image/') ? 'photo' : 'audio'];
+  if (bytes.length !== expected.size || bytes.length > limit || !matchesSignature(bytes,expected.mime_type)
+    || createHash('sha256').update(bytes).digest('hex') !== expected.sha256) {
+    throw new HttpError(400,'INVALID_FILE','File size, signature or checksum verification failed.');
+  }
+  return bytes;
+}
+
+export async function readEvidenceBytes(stream, expected, timeoutMs = 60000) {
+  const limit = EVIDENCE_LIMITS[expected.mime_type.startsWith('image/') ? 'photo' : 'audio'];
+  const iterator = stream.iterator?.({ destroyOnReturn:false }) ?? stream[Symbol.asyncIterator](), chunks = [];
+  let length = 0, timer;
+  const timeout = new Promise((_,reject) => { timer = setTimeout(() => reject(new HttpError(408,'UPLOAD_TIMEOUT','File transfer timed out. Retry the upload.')),timeoutMs); });
+  try {
+    while (true) {
+      const { value,done } = await Promise.race([iterator.next(),timeout]);
+      if (done) break;
+      const chunk = Buffer.from(value); length += chunk.length;
+      if (length > expected.size || length > limit) throw new HttpError(400,'INVALID_FILE','Uploaded file exceeds its size limit.');
+      chunks.push(chunk);
+    }
+    return validateEvidenceBytes(Buffer.concat(chunks,length),expected);
+  } finally {
+    clearTimeout(timer);
+    // Release/cancel fetch readers and stop iterators after invalid transfers.
+    // Do not wait on a stalled peer after the transfer deadline.
+    iterator.return?.().catch(() => {});
+  }
+}
+
+export function createEvidenceStorage(env, client) {
+  if (env.EVIDENCE_STORAGE_PROVIDER === 'cloudinary') return createCloudinaryStorage(env,client);
+  client ??= createStorageClient(env);
   const send = (command) => client.send(command, { abortSignal: AbortSignal.timeout(15000) });
   const Bucket = env.S3_BUCKET;
   // Sign the browser endpoint directly: changing a signed URL's host invalidates it.
@@ -81,6 +115,7 @@ export function createEvidenceStorage(env, client = createStorageClient(env)) {
   client.destroy = () => { uploadClient.destroy(); destroy(); };
   return {
     client,
+    async verify() { await verifyBucket(client,Bucket); },
     async presign(row) {
       assertEvidenceKey(row, row.staging_key, 'staging');
       const now = new Date(Math.floor(Date.now() / 1000) * 1000);

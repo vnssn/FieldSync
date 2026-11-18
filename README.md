@@ -12,7 +12,7 @@ This repository implements M0-M5: local infrastructure, sessions, tenant-isolate
 
 ## Free local demo and quick start
 
-You can demo the complete project locally without creating Render, Cloudflare, or AI-provider accounts. Docker Compose runs PostgreSQL, Redis, and MinIO on your computer; MinIO handles private photo/audio uploads. AI is disabled by default, and no cloud deployment is required. This avoids hosting charges, though Docker Desktop and your computer still use local resources. Cloud hosting with Render/R2 is optional and has separate free-tier limits; see [deployment](docs/DEPLOYMENT.md) and [R2 setup](docs/R2_SETUP.md).
+You can demo the complete project locally without cloud accounts. Docker Compose runs PostgreSQL, Redis, and MinIO; AI is disabled by default. The Render blueprint selects Cloudinary for private evidence storage with authenticated server uploads and downloads. Neon retains pooled application connections and direct migration connections. See [deployment](docs/DEPLOYMENT.md) and [Cloudinary setup](docs/CLOUDINARY_SETUP.md). The S3 adapter remains available for local MinIO and existing S3 deployments.
 
 Use Node.js >=22.12 and Docker Desktop with Linux containers. In PowerShell:
 
@@ -49,3 +49,5 @@ Open assigned work online before going into the field. Worker edits are saved on
 ## Deployment gate
 
 [render.yaml](render.yaml) is a locally validated readiness file. **Do not create, link, configure or deploy any Render backend service until the user switches their active Render account and authorizes continuation.** Blueprint import itself can trigger an initial deployment even with automatic deploys disabled. No Render account-linked step has been performed, and local tests do not establish cloud readiness or live AI quality.
+
+Cloudinary regressions: `npm run test:cloudinary` and, after building with the existing local browser prerequisites, `npm run test:cloudinary:browser`. The provider is simulated; tests do not upload to a live Cloudinary account.

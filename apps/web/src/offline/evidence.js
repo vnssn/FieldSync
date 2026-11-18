@@ -6,9 +6,12 @@ export async function uploadBlob(descriptor,blob,signal) {
     throw new Error('The local file does not match the upload reservation. It is retained for review.');
   }
   if (new Date(upload.expiresAt) <= new Date()) throw new Error('The upload URL expired. The local file is retained for retry.');
+  if (upload.transport === 'server' && new URL(upload.url).origin !== globalThis.location?.origin) {
+    throw new Error('Evidence uploads must use the current application origin.');
+  }
   const timeout=AbortSignal.timeout(60000);
   // The browser supplies Content-Length from the Blob; scripts cannot set it.
-  const response=await fetch(upload.url,{ method:upload.method,headers:upload.headers,body:blob,credentials:'omit',
+  const response=await fetch(upload.url,{ method:upload.method,headers:upload.headers,body:blob,credentials:upload.transport==='server'?'same-origin':'omit',
     signal:signal?AbortSignal.any([signal,timeout]):timeout });
   if(!response.ok) throw new Error('File upload was interrupted or rejected. The local file is retained for retry.');
 }

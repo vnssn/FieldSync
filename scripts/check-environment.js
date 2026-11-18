@@ -1,16 +1,16 @@
 import { env } from '../apps/server/src/config/env.js';
 import { createPool } from '../apps/server/src/infrastructure/database.js';
 import { createHealthCheck, measureDependency } from '../apps/server/src/modules/health/service.js';
-import { createStorageClient, verifyBucket } from '../apps/server/src/infrastructure/storage.js';
+import { createEvidenceStorage } from '../apps/server/src/infrastructure/storage.js';
 
 const pool = createPool(env);
 pool.on('error', () => {});
-const storage = createStorageClient(env);
+const storage = createEvidenceStorage(env);
 
 try {
   const [health, minio] = await Promise.all([
     createHealthCheck({ pool, env })(),
-    measureDependency(() => verifyBucket(storage, env.S3_BUCKET)),
+    measureDependency(() => storage.verify()),
   ]);
 
   const [major, minor] = process.versions.node.split('.').map(Number);
@@ -24,14 +24,14 @@ try {
     aiEnabled: env.AI_ENABLED,
     postgres: health.dependencies.postgres,
     redis: health.dependencies.redis,
-    minio: { ...minio, bucket: env.S3_BUCKET },
+    storage: { ...minio, provider: env.EVIDENCE_STORAGE_PROVIDER },
   }, null, 2));
 
   if (!ok) {
-    console.error('Check Docker service readiness and run npm run infra:up. No service success is inferred from configuration alone.');
+    console.error('Check database, Redis and the selected evidence storage provider. No service success is inferred from configuration alone.');
     process.exitCode = 1;
   }
 } finally {
   await pool.end();
-  storage.destroy();
+  storage.client.destroy();
 }

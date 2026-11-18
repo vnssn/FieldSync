@@ -4,7 +4,7 @@ import { transaction } from '../../infrastructure/transaction.js';
 import { HttpError } from '../../http/errors.js';
 import { mutate } from '../../infrastructure/mutations.js';
 import { appendAudit, changesBetween } from '../../infrastructure/audit.js';
-import { evidencePrefix } from '../../infrastructure/storage.js';
+import { evidencePrefix, assertEvidenceKey, readEvidenceBytes } from '../../infrastructure/storage.js';
 import { findInspection, publicInspection, appendRevision } from '../inspections/repository.js';
 import { findEvidence, publicEvidence, evidenceSnapshot, listEvidence } from './repository.js';
 import { enqueueJob, listJobs } from '../jobs/repository.js';
@@ -109,6 +109,35 @@ export function createEvidenceService(pool, storage, logger) {
         return current;
       });
       return storage.presign(row);
+    },
+    async uploadContent(auth, inspectionId, id, uploadId, request) {
+      assertWorker(auth);
+      if (!storage.upload) throw new HttpError(404,'NOT_FOUND','This upload transport is unavailable.');
+      // Reject before consuming bytes or contacting Cloudinary. Recheck after
+      // reception under locks, so a reassignment/renewal cannot authorize a write.
+      async function check(db, lock = false) {
+        assertEditable(await access(db,auth,inspectionId,lock));
+        const row = await findEvidence(db,auth.organizationId,inspectionId,id,lock);
+        if (!row) throw new HttpError(404,'EVIDENCE_NOT_FOUND','Evidence not found.');
+        if (row.created_by !== auth.user.id || row.status !== 'staging') throw new HttpError(409,'INVALID_STATE','This upload is no longer staging.');
+        assertEvidenceKey(row,row.staging_key,'staging');
+        if (row.expires_at <= new Date() || row.staging_key.split('/').at(-1) !== uploadId) {
+          throw new HttpError(410,'UPLOAD_EXPIRED','This staging upload expired. Request a new upload.');
+        }
+        if (request.get('content-type') !== row.mime_type || request.get('x-amz-meta-sha256') !== row.sha256
+          || (request.get('content-length') !== undefined && request.get('content-length') !== String(row.size))
+          || request.get('content-encoding')) {
+          throw new HttpError(400,'INVALID_FILE','Uploaded size, MIME type or checksum does not match the reservation.');
+        }
+        return row;
+      }
+      const expected = await check(pool);
+      const bytes = await readEvidenceBytes(request,expected);
+      await transaction(pool,async (db) => {
+        const current = await check(db,true);
+        if (current.staging_key !== expected.staging_key) throw new HttpError(410,'UPLOAD_EXPIRED','Request a new upload.');
+        await storage.upload(current,bytes);
+      });
     },
     async attach(auth, inspectionId, input) {
       assertWorker(auth);

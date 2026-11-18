@@ -38,6 +38,10 @@ test('environment parses false as false and validates numeric ports', () => {
   assert.equal(EnvironmentSchema.parse({ ...minimumEnv, RUN_INLINE_WORKER: 'true' }).RUN_INLINE_WORKER, true);
   assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, API_PORT: '0' }).success, false);
   assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, AI_ENABLED: 'yes' }).success, false);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, DATABASE_URL:'postgresql://user:pass@ep-demo-pooler.region.aws.neon.tech/db' }).success, false);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, DATABASE_URL:'postgresql://user:pass@ep-demo-pooler.region.aws.neon.tech/db', MIGRATIONS_DATABASE_URL:'postgresql://user:pass@ep-demo.region.aws.neon.tech/db' }).success, true);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, DATABASE_URL:'postgresql://user:pass@ep-demo-pooler.region.aws.neon.tech/db', DATABASE_URL_UNPOOLED:'postgresql://user:pass@ep-demo.region.aws.neon.tech/db' }).success, true);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, MIGRATIONS_DATABASE_URL:'postgresql://user:pass@ep-demo-pooler.region.aws.neon.tech/db' }).success, false);
   assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, RUN_INLINE_WORKER: 'yes' }).success, false);
 });
 

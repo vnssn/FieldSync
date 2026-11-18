@@ -22,6 +22,8 @@
     "test:m4:browser": "node scripts/verify-m4-browser.js",
     "test:m5": "node --test --test-concurrency=1 tests/m5-*.test.js",
     "test:m5:browser": "node scripts/verify-m5-browser.js",
+    "test:cloudinary": "node --test --test-concurrency=1 tests/cloudinary-*.test.js",
+    "test:cloudinary:browser": "node scripts/verify-cloudinary-browser.js",
     "worker": "node apps/server/src/worker.js",
     "dev": "concurrently --kill-others --names api,web --prefix-colors cyan,green \"npm run dev --workspace=@fieldsync/server\" \"npm run dev --workspace=@fieldsync/web\"",
     "infra:up": "node scripts/infra.js up",
@@ -34,5 +36,9 @@
   "devDependencies": {
     "concurrently": "^9.2.0",
     "supertest": "^7.1.4"
+  },
+  "dependencies": {
+    "@neon/config": "^1.14.3",
+    "@neon/env": "^2.1.6"
   }
 }

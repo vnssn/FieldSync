@@ -101,7 +101,8 @@ export async function createFixture(prefix='m5',extra={},options={}) {
   try {
     adminPool=createPool(env); await adminPool.query(`CREATE SCHEMA "${schema}"`);
     pool=createPool(env,{ schema }); await runMigrations(pool,{ info() {},warn() {},error() {} },schema);
-    storage=createEvidenceStorage(settings); await ensureBucket(storage.client,bucket,settings.S3_REGION); bucketCreated=true;
+    storage=options.storage ?? createEvidenceStorage(settings);
+    if (!options.storage) { await ensureBucket(storage.client,bucket,settings.S3_REGION); bucketCreated=true; }
     server=createServer(createApp({ pool,storage,env:settings,logger,getHealth:createHealthCheck({ pool,env:settings,logger }),webDirectory:options.webDirectory }));
     await new Promise((resolve,reject)=>{ server.once('error',reject); server.listen(0,'127.0.0.1',resolve); });
     Object.assign(fixture,{ pool,adminPool,storage,server });

@@ -26,7 +26,7 @@ export function createApp({ getHealth, logger, pool, env, storage, webDirectory 
   app.disable('x-powered-by');
   app.set('trust proxy',env?.TRUST_PROXY_HOPS ?? 0);
   app.use(helmet({ contentSecurityPolicy:{ directives:{
-    connectSrc:["'self'",...(env ? [new URL(env.S3_PUBLIC_ENDPOINT).origin]:[])],
+    connectSrc:["'self'",...(env && env.EVIDENCE_STORAGE_PROVIDER !== 'cloudinary' ? [new URL(env.S3_PUBLIC_ENDPOINT).origin]:[])],
     imgSrc:["'self'",'blob:','data:'],mediaSrc:["'self'",'blob:'],
     upgradeInsecureRequests:env?.NODE_ENV==='production' ? []:null,
   } } }));

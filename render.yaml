@@ -37,29 +37,26 @@ services:
       - key: AUTH_RATE_LIMIT
         value: "60"
       - key: DATABASE_URL
-        fromDatabase: { name: fieldsync-db, property: connectionString }
-      # Render's same-region private URL uses a self-signed certificate.
-      # Verified external TLS is an alternative documented in docs/DEPLOYMENT.md.
+        sync: false
+      - key: MIGRATIONS_DATABASE_URL
+        sync: false
+      # Neon requires TLS. The app verifies the provider certificate.
       - key: POSTGRES_SSL
-        value: "false"
+        value: "true"
       - key: REDIS_URL
         fromService: { name: fieldsync-queue, type: keyvalue, property: connectionString }
       - key: QUEUE_PREFIX
         value: fieldsync-production
-      - key: S3_ENDPOINT
+      - key: EVIDENCE_STORAGE_PROVIDER
+        value: cloudinary
+      - key: CLOUDINARY_CLOUD_NAME
         sync: false
-      - key: S3_PUBLIC_ENDPOINT
+      - key: CLOUDINARY_API_KEY
         sync: false
-      - key: S3_REGION
+      - key: CLOUDINARY_API_SECRET
         sync: false
-      - key: S3_BUCKET
+      - key: CLOUDINARY_FOLDER
         sync: false
-      - key: S3_ACCESS_KEY_ID
-        sync: false
-      - key: S3_SECRET_ACCESS_KEY
-        sync: false
-      - key: S3_FORCE_PATH_STYLE
-        value: "true"
       - key: AI_ENABLED
         value: "false"
       - key: OPENAI_API_KEY
@@ -80,13 +77,4 @@ services:
     region: singapore
     plan: free
     maxmemoryPolicy: noeviction
-    ipAllowList: []
-
-databases:
-  - name: fieldsync-db
-    region: singapore
-    plan: free
-    postgresMajorVersion: "17"
-    databaseName: fieldsync
-    user: fieldsync
     ipAllowList: []

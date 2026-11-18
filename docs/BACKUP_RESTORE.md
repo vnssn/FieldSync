@@ -2,6 +2,8 @@
 
 PostgreSQL and private evidence objects are the durable shared record. Redis is scheduling transport: required jobs and outcomes also live in PostgreSQL. A database-only backup loses attachment bytes; a Redis snapshot is insufficient to recover inspection state. Browser-only drafts/recordings are not included in a server backup.
 
+For Cloudinary, export authenticated raw verified assets in the dedicated namespace together with PostgreSQL. Record `CLOUDINARY_FOLDER`, each tenant-scoped key, original byte count, MIME from PostgreSQL and SHA-256. Restore at `<folder>/<exact existing key>` using authenticated raw signed uploads with `overwrite=false`; verify through `createEvidenceStorage().read()` before workers/traffic resume. Never restore as public assets or transform media. The S3 commands and MinIO drill below apply only to S3; they do not establish Cloudinary recovery capability. See [CLOUDINARY_SETUP.md](CLOUDINARY_SETUP.md) for coordinated provider migration.
+
 ## Backup policy and manifest
 
 Use encrypted daily PostgreSQL logical exports plus a coherent private object snapshot/version backup, retained in a restricted location outside the application environment. A starting policy is 7 daily and 4 weekly recovery points; choose retention and an RPO/RTO for the actual operator before production intake. Paid database PITR is useful but does not coordinate S3 objects automatically. Keep removed-object recovery copies under the agreed sensitive-data retention policy rather than indefinitely.

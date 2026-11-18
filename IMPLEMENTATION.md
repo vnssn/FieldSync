@@ -2,9 +2,9 @@
 
 ## Current status
 
-M0-M5 are complete and locally verified. M0 was originally verified on 2026-11-15, M1-M3 on 2026-11-16, and M4-M5 on 2026-11-17. Final M5 verification includes 110 passing automated tests, the production build, real PostgreSQL/Redis/MinIO/restore and all M3/M4/M5 browser checks. INTERVIEW.md is refreshed through M5. Code/docs/configuration changes are uncommitted; no Render account-linked action or paid AI call has occurred.
+M0-M5 are complete and locally verified. M0 was originally verified on 2026-11-15, M1-M3 on 2026-11-16, and M4-M5 on 2026-11-17. Final M5 verification includes 110 passing automated tests, the production build, real PostgreSQL/Redis/MinIO/restore and all M3/M4/M5 browser checks. INTERVIEW.md is refreshed through M5. No Render account-linked action or paid AI call has occurred.
 
-The 2026-11-18 update changes the local Blueprint to three explicit Free plans and runs BullMQ inside the web service with `RUN_INLINE_WORKER=true`; that update passed 114 tests and the build. The subsequent R2-compatible PUT upload update now passes **119 tests**, the production build and both M4/M5 browser suites. Free PostgreSQL expires after 30 days, idle shutdown pauses background work, and external private object storage is still required. R2 bucket/token/CORS/billing setup, existing-object migration and live verification remain user tasks. No Render/Cloudflare account-linked action or environment-setting change was made. Deployment and cloud smoke/recovery checks have not been executed.
+The current 2026-11-18 Blueprint uses a Free Render web service/private Redis with an inline BullMQ worker, Neon pooled runtime/direct migration connections, and Cloudinary authenticated raw evidence storage. Local verification now passes **134 automated tests**, the production build, M3/M4/M5 browser suites and a Cloudinary browser suite. Cloudinary tests use a local provider simulation with real PostgreSQL/Redis; live account capability, private access denial, quotas and coherent recovery remain release checks. The saved `.env` and Neon connection values were preserved. No deployment or cloud account configuration change was made.
 
 The verification results below were captured against the real local services. Verification closes its temporary listeners and preserves user-started processes; do not start background dev servers automatically. Run npm run dev in a foreground terminal only when requested.
 
@@ -115,7 +115,7 @@ Do not use volume deletion as an ordinary reset. Password changes in .env do not
 
 The root .env is loaded explicitly by server/scripts. Vite uses the root env directory but only exposes VITE_-prefixed values to browser code. The frontend makes relative /api requests and never receives database, Redis or S3 credentials.
 
-M5 accepts hosting DATABASE_URL/REDIS_URL, verified external PostgreSQL TLS through POSTGRES_SSL=true and verified Redis TLS through rediss://. Production requires HTTPS APP_ORIGIN and S3 endpoints. SERVE_WEB=true serves the production client on the API origin. RUN_INLINE_WORKER defaults to false locally; the Render Blueprint sets it to true to run BullMQ in the same process with a shared pool/storage and graceful shutdown. AI_ENABLED=false remains the default; an optional server-only OPENAI_API_KEY enables provider calls, with labeled fallback on missing keys/failure. Limits/models/timeouts are in .env.example. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for free-tier limits, secret inputs, storage CORS, internal Render PostgreSQL TLS limits and the mandatory account-switch gate.
+M5 accepts hosting DATABASE_URL/REDIS_URL, verified external PostgreSQL TLS through POSTGRES_SSL=true and verified Redis TLS through rediss://. For Neon, use its pooled URL as DATABASE_URL and the matching direct URL as MIGRATIONS_DATABASE_URL; migrations cannot use Neon's transaction pooler. Production requires an exact HTTPS APP_ORIGIN. S3 deployments additionally require HTTPS S3 endpoints; Cloudinary deployments ignore S3 settings and use authenticated raw assets. SERVE_WEB=true serves the production client on the API origin. RUN_INLINE_WORKER defaults to false locally; the Render Blueprint sets it to true to run BullMQ in the same process with a shared pool/storage and graceful shutdown. AI_ENABLED=false remains the default; an optional server-only OPENAI_API_KEY enables provider calls, with labeled fallback on missing keys/failure. Limits/models/timeouts are in .env.example. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for free-tier limits, Neon URL inputs, storage CORS, and the mandatory account-switch gate. Cloud evidence storage remains a separate prerequisite for hosted full workflows.
 
 AI_ENABLED=false is parsed as a Boolean false, not JavaScript's truthy string value.
 
@@ -464,3 +464,19 @@ The proxy request to http://127.0.0.1:5173/api/v1/health also returned HTTP 200 
 ### Restricted-session setup note
 
 This session used NODE_OPTIONS='--preserve-symlinks --preserve-symlinks-main' to avoid Node attempting filesystem canonicalization above the accessible workspace. This is a session-specific setting, not a requirement to change Windows permissions. Docker startup was performed in the user's own terminal; no Docker permissions or service exposure were changed.
+
+## Cloudinary evidence verification ? 2026-11-18
+
+Inspected the existing reserve/upload/promote/download/remove flow, worker verification and cleanup, tenant/assignment/creator authorization, editable-state/version/receipt controls, key ownership and file integrity. Added provider selection and an authenticated same-origin binary upload route. Bounded file reception checks MIME/size/SHA metadata, media signature and SHA-256 before provider writes, then rechecks authorization under locks. Staging and verified assets use authenticated raw Cloudinary uploads with overwrite disabled. Promotion writes the checked buffer to a fresh verified UUID. Private URLs stay server-side; downloads verify original bytes again. Existing durable jobs and generation-specific/age-based cleanup retain their security checks.
+
+The Blueprint now selects Cloudinary and requires server-only cloud name/key/secret plus a dedicated namespace; inactive S3 values cannot fail configuration. APP_ORIGIN stays mandatory as an exact HTTPS origin in production and is set in Render. Existing pooled DATABASE_URL and direct MIGRATIONS_DATABASE_URL behavior, verified PostgreSQL TLS and migration-before-start order are preserved. No database schema migration was added.
+
+Validation:
+
+- `npm ci --include=dev` and `npm run build` exited 0.
+- `npm test` exited 0: 134/134 tests, including 15 Cloudinary unit/integration cases and the existing real PostgreSQL/Redis/MinIO restore, worker, authorization, receipts and offline regression suites.
+- M3, M4 and M5 browser suites exited 0. The new `npm run test:cloudinary:browser` also passed with the built UI, actual Edge/IndexedDB/cookies and real PostgreSQL/Redis: offline photo/audio replay, same-origin session uploads, worker verification, exact download hashes and authorized removal. The browser never contacted Cloudinary.
+- Local `check:env` passed for PostgreSQL/Redis/MinIO. The local Render Blueprint passed the public JSON schema and assertions for Cloudinary, pooled/direct inputs and disabled automatic deployments.
+- Tests used process-only local configuration; the existing `.env` was not changed. Cloudinary account operations, live provider requests and deployment were not performed.
+
+Dependency audit reports five high-severity findings in the existing Vite/picomatch build toolchain; none are in Cloudinary. No unrelated major build-tool migration was attempted. Live authenticated raw support, maximum raw/audio file sizes, bandwidth/storage/Admin API quotas and private backup recovery still require operator verification before release. See [CLOUDINARY_SETUP.md](docs/CLOUDINARY_SETUP.md).
