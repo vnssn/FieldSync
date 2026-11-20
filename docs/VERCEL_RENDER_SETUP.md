@@ -6,7 +6,7 @@ Production frontend: **https://fieldsync-six.vercel.app**. Existing backend: **h
 
 The Vercel production deployment is live. HTTP checks passed for the shell, `/login`, an inspection deep link, JavaScript service worker, missing-asset 404 and proxied `/api/v1/health`. Direct and proxied API health report PostgreSQL/Redis up. An unauthenticated `/api/v1/auth/me` returns JSON 401 without being cached or rewritten to HTML.
 
-Render's saved CLI token is expired. The live API currently rejects the Vercel production Origin with `403 INVALID_ORIGIN`; backend configuration/deployment and live browser login/evidence/offline acceptance remain pending. Browser dashboard automation also stopped because the browser URL could not be verified by its policy controls. **Render frontend serving remains enabled until the Vercel browser tests pass.** The checks above do not establish login persistence, real Cloudinary upload/delete or production offline replay.
+Render access and the Vercel production Origin are now verified. The existing API is live at idle-compute release `17333e3`; its approved Vercel preflight returns 204 and foreign origins remain denied. Direct/proxied liveness and dependency health pass, with PostgreSQL/Redis up. The platform health check uses `/api/v1/live`, and inline idle recovery is thirty minutes. Optional external cron activation awaits scheduler access. **Render frontend serving remains enabled until the Vercel browser tests pass.** Authenticated browser login persistence, real Cloudinary upload/delete and production offline replay remain unverified; HTTP checks alone do not establish them.
 
 ## Monorepo configuration
 

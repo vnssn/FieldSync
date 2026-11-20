@@ -2,7 +2,7 @@
 
 ## Current status
 
-The 2026-11-21 local idle-compute update passes **150/150 automated tests** and the production build. It adds dependency-free `/api/v1/live`, shared-pool post-commit wake signals for inline jobs, known-deadline scheduling and thirty-minute idle recovery. The Render Blueprint now uses liveness for platform probes. Deployment, the existing Render Health Check Path update, optional ten-minute external cron activation and measured Neon CU savings remain pending; no production configuration/data or secrets were changed.
+The 2026-11-21 idle-compute update passes **150/150 automated tests** and the production build. Commit `17333e3` is now live on the existing Render API. It adds dependency-free `/api/v1/live`, shared-pool post-commit wake signals for inline jobs, known-deadline scheduling and thirty-minute idle recovery. Render uses liveness for platform probes and has the thirty-minute idle setting. Direct/proxied liveness and dependency health passed live. Optional ten-minute external cron activation and measured Neon CU savings remain pending; provider secrets were preserved and no new schema migration was added.
 
 M0-M5 are complete and locally verified. M0 was originally verified on 2026-11-15, M1-M3 on 2026-11-16, and M4-M5 on 2026-11-17. Final M5 verification includes 110 passing automated tests, the production build, real PostgreSQL/Redis/MinIO/restore and all M3/M4/M5 browser checks. INTERVIEW.md is refreshed through M5. No Render account-linked action or paid AI call has occurred.
 
@@ -18,6 +18,12 @@ The verification results below were captured against the real local services. Ve
 - Local Render YAML parsing, unique variable names, free-service settings, liveness path and the thirty-minute idle setting passed. Full validation against the cached official schema could not run because its native dependency targets Python 3.12 while this machine has Python 3.11; no package installation or cloud validation was performed.
 - The inline worker retains durable SQL intent, bounded retries, fenced leases and startup recovery. With no due work it can sleep between thirty-minute recovery/cleanup passes; a known earlier deadline or committed job accelerates the next pass. Separate local workers retain their existing fast polling. Lost wake hints may delay recovery up to the configured idle interval, and Render sleeping still pauses its inline worker.
 - [DEPLOYMENT.md](docs/DEPLOYMENT.md#render-keep-alive-and-neon-idle-compute) records the optional cron URL, ten-minute GET schedule, timeout and existing-service rollout. Neither live endpoint behavior nor quota savings is claimed from local tests; existing Render dependency health checks must be switched to liveness after deployment before activating keep-alive.
+
+## Live idle-compute deployment — 2026-11-21
+
+- After the user confirmed the intended Render account was active, pushed tested commit `17333e3` and deployed the existing `fieldsync-api` service. The latest deployment `dep-dc0ad21tn18s73eviucg` is live at that commit. Render's Blueprint sync applied `/api/v1/live` as Health Check Path and `JOBS_IDLE_INTERVAL_MS=1800000`; inline processing remains enabled. No replacement service, paid instance, separate worker or Neon cron was created. Cloudinary, Neon and Redis configuration remains present; no provider credentials were copied or printed.
+- HTTP verification after the latest deployment: direct and Vercel-proxied `/api/v1/live` return 200 and no-store; direct/proxied `/api/v1/health` return 200 with PostgreSQL and Redis up. The approved Vercel preflight returns 204, a foreign origin returns 403, and unauthenticated proxied `/auth/me` returns uncached JSON 401. These checks do not establish authenticated browser persistence, Cloudinary account behavior or measured CU savings.
+- The ten-minute cron is not active: no cron-job.org API credential is available in the local environment. The request was made for the user to store `CRON_JOB_API_KEY` in ignored `.env.local` or configure the cron manually. Live observations are also recorded in ignored `.local/neon-idle-deploy.json` without credentials.
 
 ## Six milestones
 
