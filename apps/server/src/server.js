@@ -24,7 +24,8 @@ export function startServer({
   if (webDirectory && !existsSync(`${webDirectory}/index.html`)) throw new Error('Build the web client before starting SERVE_WEB.');
   const app = createApp({ getHealth, logger, pool, env: settings, storage, webDirectory });
   // The HTTP API and worker share their pool/storage; only this owner closes them.
-  const runtime = settings.RUN_INLINE_WORKER ? createJobRuntime({ pool, storage, env: settings, logger }) : undefined;
+  const runtime = settings.RUN_INLINE_WORKER ? createJobRuntime({ pool, storage, env: settings, logger,
+    idleIntervalMs:settings.JOBS_IDLE_INTERVAL_MS ?? 1800000 }) : undefined;
   if (runtime) logger.info('FieldSync inline background worker started');
 
   const server = createServer(app);

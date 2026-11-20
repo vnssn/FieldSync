@@ -48,6 +48,8 @@ Open assigned work online before going into the field. Worker edits are saved on
 
 ## Hosted deployment
 
+Optional Render keep-alive should call `/api/v1/live`, which returns process status without database/Redis queries. The Blueprint uses this path for platform health checks. The inline worker wakes on committed job intent, waits for known job deadlines, and uses thirty-minute recovery when idle so Neon can suspend between work. Dependency readiness remains `/api/v1/health`. See the [idle compute and scheduler setup](docs/DEPLOYMENT.md#render-keep-alive-and-neon-idle-compute); these local changes require an approved rollout before enabling cron.
+
 [render.yaml](render.yaml) describes the existing API and Redis topology. Update the existing Render service during cutover; importing a new Blueprint can create duplicate resources. The Vercel frontend is live, while the Render origin update and live browser acceptance await refreshed Render access. Keep Render frontend serving enabled until Vercel login, evidence and offline checks pass. Local tests do not establish live Cloudinary capabilities or browser session persistence.
 
 Cloudinary regressions: `npm run test:cloudinary` and, after building with the existing local browser prerequisites, `npm run test:cloudinary:browser`. The provider is simulated; tests do not upload to a live Cloudinary account.

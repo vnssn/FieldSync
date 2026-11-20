@@ -12,7 +12,8 @@ services:
     buildCommand: npm ci --include=dev && npm run build
     # Free web services have no pre-deploy hook. Migrate before either runtime starts.
     startCommand: npm run db:migrate && npm run start --workspace=@fieldsync/server
-    healthCheckPath: /api/v1/health
+    # Process probes must not prevent Neon from suspending while the site is idle.
+    healthCheckPath: /api/v1/live
     envVars:
       - key: NODE_VERSION
         value: "22"
@@ -26,6 +27,8 @@ services:
         value: "true"
       - key: RUN_INLINE_WORKER
         value: "true"
+      - key: JOBS_IDLE_INTERVAL_MS
+        value: "1800000"
       - key: TRUST_PROXY_HOPS
         value: "1"
       - key: APP_ORIGIN

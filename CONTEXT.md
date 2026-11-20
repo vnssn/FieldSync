@@ -268,6 +268,12 @@ Before creating, linking, configuring, or starting deployment of any backend ser
 
 ## Verification and change discipline
 
+### Inline worker idle compute update
+
+`GET /api/v1/live` is process-only liveness for Render platform/optional cron probes; `/api/v1/health` still probes PostgreSQL and Redis. The Blueprint health check targets liveness so idle platform checks need not resume Neon. This local configuration is not a deployed Render setting.
+
+Inline worker transactions signal committed job intent through their shared PostgreSQL pool, after commit and client release. Signals are coalesced and never overlap reconciliation; SQL remains authoritative. Known retry/cleanup/lease deadlines bound the next pass. Empty inline runtimes fall back to `JOBS_IDLE_INTERVAL_MS` (30 minutes by default); overdue work/errors retain five-second retry. Object sweeps run inside these passes, so idle cleanup/recovery can wait up to the idle interval. Standalone local workers retain five-second reconciliation. Restart reconciliation and lease fencing remain unchanged; no schema migration or separate Neon cron is introduced.
+
 Run relevant tests, build the web client, and record actual live verification in IMPLEMENTATION.md. Never mark a live infrastructure check passed based on code inspection, mocks, or an image's published listing.
 
 Keep the checklist accurate when an environment blocker prevents a required check. Close temporary verification servers; preserve user-started development processes. Work beyond the accepted M0-M5 scope requires a new request. Deployment approval is still outstanding after local M5 completion.

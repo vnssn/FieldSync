@@ -69,6 +69,25 @@ test('health API reports dependency failure with HTTP 503', async () => {
   assert.equal(response.body.dependencies.postgres.status, 'down');
 });
 
+test('liveness GET and HEAD avoid dependency probes even when health is degraded', async () => {
+  let probes = 0;
+  const app = createApp({ getHealth: async () => { probes++; return health('degraded'); }, logger: createLogger('silent') });
+  const response = await request(app).get('/api/v1/live').expect(200);
+  assert.deepEqual(response.body, { status: 'ok', service: 'fieldsync-api' });
+  assert.equal(response.headers['cache-control'], 'no-store');
+  await request(app).head('/api/v1/live').expect(200);
+  await request(app).get('/api/v1/live?probe=db').expect(400);
+  assert.equal(probes, 0);
+  await request(app).get('/api/v1/health').expect(503);
+  assert.equal(probes, 1);
+});
+
+test('inline idle recovery defaults to thirty minutes and rejects sub-six-minute intervals', () => {
+  assert.equal(EnvironmentSchema.parse(minimumEnv).JOBS_IDLE_INTERVAL_MS, 1800000);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, JOBS_IDLE_INTERVAL_MS: '300000' }).success, false);
+  assert.equal(EnvironmentSchema.parse({ ...minimumEnv, JOBS_IDLE_INTERVAL_MS: '360000' }).JOBS_IDLE_INTERVAL_MS, 360000);
+});
+
 test('health query rejects unknown input', async () => {
   let called = false;
   const app = createApp({ getHealth: async () => { called = true; return health(); }, logger: createLogger('silent') });

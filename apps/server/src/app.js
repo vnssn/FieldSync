@@ -45,6 +45,17 @@ export function createApp({ getHealth, logger, pool, env, storage, webDirectory 
   });
 
   if (env) app.use('/api/v1',createCorsGuard(env));
+  // Platform/cron probes check the HTTP process without waking PostgreSQL/Redis.
+  // Dependency readiness remains available separately at /api/v1/health.
+  app.get('/api/v1/live', (request, response) => {
+    if (!HealthQuerySchema.safeParse(request.query).success) {
+      return response.status(400).json(ErrorResponseSchema.parse({
+        error: { code: 'INVALID_REQUEST', message: 'The liveness endpoint accepts no query parameters.' },
+        requestId: request.id,
+      }));
+    }
+    return response.json({ status: 'ok', service: 'fieldsync-api' });
+  });
   if (pool && env) {
     app.use('/api/v1', createOriginGuard(env));
     const requireAuth = createRequireAuth(pool);

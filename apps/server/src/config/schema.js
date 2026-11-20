@@ -35,6 +35,7 @@ export const EnvironmentSchema = z.preprocess((input) => {
   SESSION_TTL_HOURS: z.coerce.number().int().min(1).max(720).default(168),
   SERVE_WEB: booleanString.prefault('false'),
   RUN_INLINE_WORKER: booleanString.prefault('false'),
+  JOBS_IDLE_INTERVAL_MS: z.coerce.number().int().min(360000).max(86400000).default(1800000),
   TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(1).default(0),
   AUTH_RATE_LIMIT: z.coerce.number().int().min(1).max(10000).default(60),
   AI_RATE_LIMIT: z.coerce.number().int().min(1).max(10000).default(10),

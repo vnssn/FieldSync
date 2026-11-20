@@ -3,7 +3,8 @@ import { Queue, Worker } from 'bullmq';
 import Redis from 'ioredis';
 import { z } from 'zod';
 import { jobPayloadSchema,reportJobDataSchema,reportJobResultSchema,verificationResultSchema,inspectionSchema } from '@fieldsync/contracts';
-import { transaction } from '../../infrastructure/transaction.js';
+import { transaction, jobsCommittedEvent } from '../../infrastructure/transaction.js';
+import { createReconciliationScheduler } from './scheduler.js';
 import { assertEvidenceKey } from '../../infrastructure/storage.js';
 import { findEvidence } from '../evidence/repository.js';
 import { findArtifact, completeArtifact } from '../ai/repository.js';
@@ -140,7 +141,7 @@ export async function reconcileObjects(pool,storage,olderThan = new Date(Date.no
   }
 }
 
-export function createJobRuntime({ pool,storage,env,logger,aiProvider = createAiProvider(env),queueName='fieldsync-jobs',intervalMs=5000 }) {
+export function createJobRuntime({ pool,storage,env,logger,aiProvider = createAiProvider(env),queueName='fieldsync-jobs',intervalMs=5000,idleIntervalMs=intervalMs }) {
   const redis = { ...redisConnection(env),connectTimeout:3000 };
   const connection = new Redis({ ...redis,maxRetriesPerRequest:null });
   // Queue commands fail promptly during an outage; required work remains in SQL.
@@ -153,10 +154,8 @@ export function createJobRuntime({ pool,storage,env,logger,aiProvider = createAi
   const worker = new Worker(queueName,async (job) => processJob({ pool,storage,aiProvider },job.data),{ connection,prefix:env.QUEUE_PREFIX,concurrency:2,lockDuration:30000 });
   worker.on('error',() => logger?.warn('Background worker unavailable'));
   worker.on('failed',() => logger?.warn('Background job will retry or remain failed in PostgreSQL'));
-  let stopped=false,running=false,lastSweep=0;
+  let lastSweep=0;
   async function reconcile() {
-    if (stopped || running) return;
-    running=true;
     try {
       await recoverExpiredJobs(pool);
       const due = await pool.query(`SELECT id,organization_id FROM background_jobs WHERE attempts<5 AND
@@ -169,17 +168,31 @@ export function createJobRuntime({ pool,storage,env,logger,aiProvider = createAi
         });
       }
       if (Date.now()-lastSweep>60000) { await reconcileObjects(pool,storage); lastSweep=Date.now(); }
-    } catch { logger?.warn('Background reconciliation deferred'); }
-    finally { running=false; }
+      // Future staging cleanup and live leases do not justify five-second
+      // polling. Wake at their known deadline, bounded by idle recovery.
+      const pending = await pool.query(`SELECT min(CASE WHEN status='running' THEN lease_until ELSE run_after END) AS wake_at
+        FROM background_jobs WHERE status IN ('queued','retry','running')`);
+      const next = pending.rows[0]?.wake_at;
+      return next ? new Date(next).getTime()-Date.now() : null;
+    } catch {
+      logger?.warn('Background reconciliation deferred');
+      throw new Error('Background reconciliation deferred');
+    }
   }
-  const timer = setInterval(reconcile,intervalMs);
-  reconcile();
-  return { queue,worker,reconcile,
+  const scheduler = createReconciliationScheduler({ run:reconcile,intervalMs,idleIntervalMs });
+  pool.on(jobsCommittedEvent,scheduler.wake);
+  worker.on('completed',scheduler.wake);
+  worker.on('failed',scheduler.wake);
+  void scheduler.reconcile();
+  return { queue,worker,reconcile:scheduler.reconcile,
     async close() {
-      stopped=true; clearInterval(timer);
+      pool.off(jobsCommittedEvent,scheduler.wake);
+      worker.off('completed',scheduler.wake);
+      worker.off('failed',scheduler.wake);
       try {
+        const draining = scheduler.close();
         await worker.close();
-        while(running) await new Promise((resolve) => setTimeout(resolve,20));
+        await draining;
         await queue.close();
       } finally { connection.disconnect(); queueConnection.disconnect(); }
     },

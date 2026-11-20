@@ -2,11 +2,22 @@
 
 ## Current status
 
+The 2026-11-21 local idle-compute update passes **150/150 automated tests** and the production build. It adds dependency-free `/api/v1/live`, shared-pool post-commit wake signals for inline jobs, known-deadline scheduling and thirty-minute idle recovery. The Render Blueprint now uses liveness for platform probes. Deployment, the existing Render Health Check Path update, optional ten-minute external cron activation and measured Neon CU savings remain pending; no production configuration/data or secrets were changed.
+
 M0-M5 are complete and locally verified. M0 was originally verified on 2026-11-15, M1-M3 on 2026-11-16, and M4-M5 on 2026-11-17. Final M5 verification includes 110 passing automated tests, the production build, real PostgreSQL/Redis/MinIO/restore and all M3/M4/M5 browser checks. INTERVIEW.md is refreshed through M5. No Render account-linked action or paid AI call has occurred.
 
 The current 2026-11-18 Blueprint uses a Free Render web service/private Redis with an inline BullMQ worker, Neon pooled runtime/direct migration connections, and Cloudinary authenticated raw evidence storage. Local verification now passes **134 automated tests**, the production build, M3/M4/M5 browser suites and a Cloudinary browser suite. Cloudinary tests use a local provider simulation with real PostgreSQL/Redis; live account capability, private access denial, quotas and coherent recovery remain release checks. The saved `.env` and Neon connection values were preserved. No deployment or cloud account configuration change was made.
 
 The verification results below were captured against the real local services. Verification closes its temporary listeners and preserves user-started processes; do not start background dev servers automatically. Run npm run dev in a foreground terminal only when requested.
+
+## Idle compute verification — 2026-11-21
+
+- `node --import ./.local/test-local-env.mjs --test --test-concurrency=1 tests/*.test.js` passed 150/150, zero failed/skipped/cancelled, in 110.4 seconds. The existing preload clears cloud database/Redis URLs and forces loopback Docker PostgreSQL, Redis and MinIO. Fixtures use isolated schemas/buckets/queue prefixes; the real restore test uses a new disposable local database. No production migration or data operation ran.
+- The focused foundation, scheduler, idle worker and server-runtime checks first passed 23/23. The full run adds an API-driven evidence case and covers liveness GET/HEAD with no dependency probe; idle query suppression; immediate committed-job/evidence verification wake; future cleanup/deadline scheduling; rollback signal isolation; non-overlapping/coalesced wakes; error retries; and draining shutdown. A controlled clock checks the thirty-minute fallback without thirty minutes of wall-clock waiting; real PostgreSQL/Redis/MinIO checks prove the wake path and delayed work behavior.
+- `npm.cmd run build` passed. Changed source/config/test files passed a private-value scan, and Git whitespace checks passed. The root `.env` was not edited.
+- Local Render YAML parsing, unique variable names, free-service settings, liveness path and the thirty-minute idle setting passed. Full validation against the cached official schema could not run because its native dependency targets Python 3.12 while this machine has Python 3.11; no package installation or cloud validation was performed.
+- The inline worker retains durable SQL intent, bounded retries, fenced leases and startup recovery. With no due work it can sleep between thirty-minute recovery/cleanup passes; a known earlier deadline or committed job accelerates the next pass. Separate local workers retain their existing fast polling. Lost wake hints may delay recovery up to the configured idle interval, and Render sleeping still pauses its inline worker.
+- [DEPLOYMENT.md](docs/DEPLOYMENT.md#render-keep-alive-and-neon-idle-compute) records the optional cron URL, ten-minute GET schedule, timeout and existing-service rollout. Neither live endpoint behavior nor quota savings is claimed from local tests; existing Render dependency health checks must be switched to liveness after deployment before activating keep-alive.
 
 ## Six milestones
 
