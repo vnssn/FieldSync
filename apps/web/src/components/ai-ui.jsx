@@ -58,7 +58,7 @@ export function AiPanel({ inspection,content,disabled=false,readOnly=false,prepa
     <h2 className="text-xl font-semibold">Assistance, with your review</h2>
     <p className="text-sm text-stone-600">Suggestions never change your report automatically. Review each field before applying. A manager still reviews the submitted report.</p>
     {!online && <p className="text-sm text-amber-800">Reconnect for assistance. Checklists, recordings and files still save on this device.</p>}
-    {online && query.data && <p className="text-xs text-stone-500">{query.data.providerEnabled?'Requesting assistance sends the selected evidence or checklist to OpenAI.':'AI provider is unavailable or disabled. Requests produce labeled manual-assistance drafts.'}</p>}
+    {online && query.data && <p className="text-xs text-stone-500">{query.data.providerEnabled?'Available assistance sends saved checklist text or selected evidence to the configured AI provider. Requests without an available provider produce labeled manual-assistance drafts.':'AI provider is unavailable or disabled. Requests produce labeled manual-assistance drafts.'}</p>}
     <ErrorNotice error={error ?? (online?query.error:null)} /><MutationNotice mutation={request} />
     {worker&&!readOnly && <div className="space-y-3">
       {disabled && !attempt && <p className="text-sm text-stone-500">Save and sync your current edits/files before requesting or applying assistance.</p>}

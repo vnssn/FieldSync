@@ -13,6 +13,52 @@ let f;
 before(async()=>{ f=await createFixture(); });
 after(async()=>{ await f?.close(); });
 const reviewBody=(row,extra={})=>intent({ decision:'apply',confirmed:true,baseVersion:row.version,...completeContent(row),...extra });
+
+test('Groq report draft crosses the real job pipeline and only changes inspection content after worker review',async()=>{
+  const pipe=await createFixture('m5groq',{ AI_ENABLED:true,AI_REPORT_PROVIDER:'groq',GROQ_API_KEY:'synthetic-groq-pipeline-key',OPENAI_API_KEY:'' });
+  let server;
+  try {
+    const initial=await pipe.fresh(),content=completeContent(initial,'Recorded inspection notes.');
+    content.answers[1]={ ...content.answers[1],outcome:'fail',notes:'Oil seepage at the seal.' };
+    const row=(await pipe.send('patch',`/inspections/${initial.id}`,pipe.workerA,intent({ ...content,baseVersion:initial.version })).expect(200)).body;
+    const status=(await pipe.send('get',`/inspections/${row.id}/ai`,pipe.workerA).expect(200)).body;
+    assert.equal(status.providerEnabled,true); assert.ok(!JSON.stringify(status).includes(pipe.settings.GROQ_API_KEY));
+    const requests=[],draft={ text:'Pressure passed. Leak check failed: oil seepage at the seal.',warnings:['Review before applying.'] };
+    server=createServer(async(req,res)=>{
+      const chunks=[]; for await(const chunk of req) chunks.push(chunk);
+      requests.push({ path:req.url,body:JSON.parse(Buffer.concat(chunks).toString('utf8')) });
+      res.setHeader('Content-Type','application/json');
+      res.end(JSON.stringify({ id:'groq-pipeline-report',model:'groq-pipeline-model',
+        choices:[{ index:0,finish_reason:'stop',message:{ role:'assistant',content:JSON.stringify(draft) } }] }));
+    });
+    await new Promise((resolve,reject)=>{ server.once('error',reject); server.listen(0,'127.0.0.1',resolve); });
+    const origin=`http://127.0.0.1:${server.address().port}`;
+    const provider=createAiProvider(pipe.settings,{ fetchImpl:(url,options)=>fetch(`${origin}${new URL(url).pathname}`,options) });
+    const artifact=await pipe.request(row);
+    await pipe.runtime(async()=>{ await poll(async()=> (await pipe.artifact(row,artifact.id)).status==='ready','Groq report job'); },provider);
+    assert.equal(requests.length,1); assert.equal(requests[0].path,'/openai/v1/chat/completions');
+    const context=JSON.parse(requests[0].body.messages[1].content);
+    assert.equal(context.sourceVersion,row.version); assert.deepEqual(context.answers,row.answers);
+    const suggestion=await pipe.artifact(row,artifact.id);
+    assert.equal(suggestion.provider,'groq'); assert.equal(suggestion.providerRequestId,'groq-pipeline-report');
+    assert.equal(suggestion.model,'groq-pipeline-model'); assert.equal(suggestion.original.text,draft.text);
+    assert.deepEqual(suggestion.original.findings,[]); assert.equal(suggestion.review,null);
+    const before=(await pipe.detail(row)).inspection;
+    assert.equal(before.version,row.version); assert.equal(before.reportText,row.reportText); assert.deepEqual(before.answers,row.answers);
+    const body=reviewBody(row,{ answers:row.answers,reportText:`Worker reviewed: ${draft.text}` });
+    const saved=(await pipe.send('post',`/inspections/${row.id}/ai/${artifact.id}/review`,pipe.workerA,body).expect(200)).body;
+    assert.equal(saved.version,row.version+1); assert.equal(saved.aiSources[0].provider,'groq');
+    assert.equal(saved.reportText,body.reportText); assert.deepEqual(saved.answers,row.answers);
+    const replay=(await pipe.send('post',`/inspections/${row.id}/ai/${artifact.id}/review`,pipe.workerA,body).expect(200)).body;
+    assert.equal(replay.version,saved.version);
+    const reviewed=await pipe.artifact(saved,artifact.id);
+    assert.equal(reviewed.original.text,draft.text); assert.equal(reviewed.review.decision,'apply');
+  } finally {
+    if(server) await new Promise((resolve)=>{ server.close(resolve); server.closeAllConnections(); });
+    await pipe.close();
+  }
+});
+
 function review(row,artifact,body=reviewBody(row),actor=f.workerA) {
   return f.send('post',`/inspections/${row.id}/ai/${artifact.id}/review`,actor,body);
 }

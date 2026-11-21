@@ -31,7 +31,7 @@ export async function poll(check,label,timeout=15000) {
 export async function createFixture(prefix='m5',extra={},options={}) {
   assert.match(prefix,/^m5[a-z]*$/);
   const id=randomUUID(),schema=`fieldsync_${prefix}_${id.replaceAll('-','')}`,bucket=`fieldsync-${prefix}-${id}`;
-  const settings={ ...env,AI_ENABLED:false,AI_MAX_PER_HOUR:1000,AI_RATE_LIMIT:1000,AUTH_RATE_LIMIT:1000,S3_BUCKET:bucket,QUEUE_PREFIX:schema,...extra };
+  const settings={ ...env,AI_ENABLED:false,AI_REPORT_PROVIDER:'openai',GROQ_API_KEY:'',AI_MAX_PER_HOUR:1000,AI_RATE_LIMIT:1000,AUTH_RATE_LIMIT:1000,S3_BUCKET:bucket,QUEUE_PREFIX:schema,...extra };
   const origin=new URL(settings.APP_ORIGIN).origin,logger=createLogger('silent'),directories=new Map(),password='M5-integration-password-27';
   let pool,adminPool,storage,server,bucketCreated=false;
   const fixture={ schema,bucket,settings,origin,logger,directories,password,

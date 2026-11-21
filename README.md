@@ -27,7 +27,16 @@ Open http://localhost:5173 and create your organization. Use the organization ID
 
 Run `npm run worker` in a second foreground terminal for evidence verification, cleanup, AI requests and printable report archives. Files upload before submission, which waits for verified evidence. MinIO CORS must match APP_ORIGIN and S3_PUBLIC_ENDPOINT must be browser-reachable.
 
-All M0-M5 workflows run locally. AI_ENABLED defaults to false: image/voice requests show labeled manual fallbacks and report drafts summarize recorded checks. To opt in, set AI_ENABLED=true and a server-only OPENAI_API_KEY in `.env`, then restart API/worker; models and timeout are configurable. A worker must explicitly review/edit/confirm suggestions before inspection content changes. Managers still review submitted reports. Provider outages leave manual work available.
+All M0-M5 workflows run locally. AI_ENABLED defaults to false: image/voice requests show labeled manual fallbacks and report drafts summarize recorded checks. The existing **Draft report** button supports a direct Groq API call. To enable it, set these server/worker settings in the root `.env`, then restart the API and worker:
+
+    AI_ENABLED=true
+    AI_REPORT_PROVIDER=groq
+    GROQ_API_KEY=<your Groq API key>
+    GROQ_MODEL=openai/gpt-oss-20b
+
+Keep the key in the ignored `.env`, never in frontend code or a `VITE_` variable. Report drafting sends the saved asset/checklist/notes to Groq Chat Completions, validates the returned JSON, and stores an editable suggestion with model/request provenance. A worker must review/edit/confirm it before inspection content changes. Managers still review submitted reports. Missing keys, timeouts and provider failures produce labeled manual drafts.
+
+Photo/voice assistance uses the optional server-only OPENAI_API_KEY. Set AI_REPORT_PROVIDER=openai to use the existing OpenAI report adapter; this is also the default when the setting is absent. Models and timeout are configurable. Groq contract tests simulate its HTTP responses and do not establish live account access or model accuracy.
 
 The Dashboard shows current inspection statuses, failed checks, submission timing, daily activity and up to 50 asset summaries for 7/30/90 UTC days. Admins see the organization; workers see current assignments. Record voice notes offline in a supported HTTPS/localhost browser, then attach them before leaving the page. Attached recordings use the existing durable file queue and upload on reconnect.
 

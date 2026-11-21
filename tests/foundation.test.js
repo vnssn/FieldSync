@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import request from 'supertest';
+import { spawnSync } from 'node:child_process';
 import { HealthResponseSchema } from '@fieldsync/contracts';
 import { EnvironmentSchema } from '../apps/server/src/config/schema.js';
 import { createLogger } from '../apps/server/src/infrastructure/logger.js';
@@ -47,6 +48,23 @@ test('environment parses false as false and validates numeric ports', () => {
 
 test('environment rejects invalid URLs without throwing outside Zod', () => {
   assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv, S3_ENDPOINT: 'not-a-url' }).success, false);
+});
+
+test('Groq configuration is optional, validates provider selection and preserves existing OpenAI defaults', () => {
+  const defaults=EnvironmentSchema.parse(minimumEnv);
+  assert.equal(defaults.AI_REPORT_PROVIDER,'openai'); assert.equal(defaults.GROQ_API_KEY,undefined);
+  assert.equal(defaults.GROQ_MODEL,'openai/gpt-oss-20b');
+  const configured=EnvironmentSchema.parse({ ...minimumEnv,AI_ENABLED:'true',AI_REPORT_PROVIDER:'groq',GROQ_API_KEY:' synthetic-groq-key ',GROQ_MODEL:' custom-model ' });
+  assert.equal(configured.GROQ_API_KEY,'synthetic-groq-key'); assert.equal(configured.GROQ_MODEL,'custom-model');
+  assert.equal(EnvironmentSchema.parse({ ...minimumEnv,AI_REPORT_PROVIDER:'groq',GROQ_API_KEY:'' }).GROQ_API_KEY,undefined);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv,AI_REPORT_PROVIDER:'unknown' }).success,false);
+  assert.equal(EnvironmentSchema.safeParse({ ...minimumEnv,GROQ_MODEL:'' }).success,false);
+});
+
+test('logs redact the Groq API key', () => {
+  const child=spawnSync(process.execPath,['--input-type=module','-e',"import { createLogger } from './apps/server/src/infrastructure/logger.js'; createLogger().info({ GROQ_API_KEY:'private-groq-test-value' },'provider settings');"],{ encoding:'utf8' });
+  assert.equal(child.status,0); assert.ok(!child.stdout.includes('private-groq-test-value'));
+  assert.equal(JSON.parse(child.stdout).GROQ_API_KEY,'[REDACTED]');
 });
 
 test('health contract cannot claim success with a failed dependency', () => {

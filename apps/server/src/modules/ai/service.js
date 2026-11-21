@@ -8,6 +8,7 @@ import { findInspection, updateInspection, appendRevision } from '../inspections
 import { findEvidence } from '../evidence/repository.js';
 import { enqueueJob } from '../jobs/repository.js';
 import { findArtifact, publicArtifact, listArtifacts } from './repository.js';
+import { isAiProviderEnabled } from './provider.js';
 
 const editable = ['assigned', 'draft', 'changes_requested'];
 function assertAccess(auth, inspection) {
@@ -25,7 +26,7 @@ export function createAiService(pool, env) {
     list(auth, id) {
       return transaction(pool, async (db) => {
         assertAccess(auth, await findInspection(db, auth.organizationId, id));
-        return aiListSchema.parse({ artifacts: await listArtifacts(db, auth.organizationId, id), providerEnabled: Boolean(env.AI_ENABLED && env.OPENAI_API_KEY) });
+        return aiListSchema.parse({ artifacts: await listArtifacts(db, auth.organizationId, id), providerEnabled: isAiProviderEnabled(env) });
       }, { readOnly: true });
     },
     request(auth, id, input) {

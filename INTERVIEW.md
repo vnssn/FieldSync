@@ -78,7 +78,7 @@ Current findings are failed-check notes and `reportText`, without a separate fin
   +------------------------------+
 
   HTTP/SQL/storage/queue paths shown here are implemented through M5.
-  AI jobs use the optional OpenAI adapter; human review applies current results.
+  AI jobs use optional Groq report drafting or OpenAI evidence/report assistance; human review applies current results.
   AI originals/reviews and scoped analytics use the same tenant database.
   Redis is also probed by the current API; MinIO is checked by setup/check:env.
 ```
