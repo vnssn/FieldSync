@@ -47,6 +47,8 @@ Provide the existing API service's `sync: false` inputs through Render's server 
 
 `AI_ENABLED` and `GROQ_API_KEY` use `sync: false`: set the flag to `true` and save the key on the existing API, then redeploy. Root `.env` changes apply locally and are not uploaded to Render. The previous Blueprint values (`false` and an empty key) could overwrite a manually enabled integration during synchronization. Render ignores `sync: false` entries when updating an existing Blueprint, preserving the operator's configured values. See [Render's secret-input rules](https://render.com/docs/blueprint-spec#prompting-for-secret-values). For API-based changes, update each variable individually; bulk environment replacement can remove unrelated settings.
 
+The repair at `5849547` was deployed to the existing Free API on 2026-11-21. After deployment, the saved flag/key and latest startup log confirmed AI enabled, and direct/proxied health passed with PostgreSQL/Redis up. All other environment values were preserved. The authenticated hosted Draft report workflow still needs verification; local Groq connectivity and startup activation do not establish that full workflow.
+
 | Input | Required value |
 | --- | --- |
 | `APP_ORIGIN` | Exact final HTTPS browser origin, such as `https://fieldsync.example.com`; no path. No trailing slash, credentials, query or fragment. Set it in Render before startup; build does not require it. Use the same origin for UI, cookies, CSRF and microphone permissions. Cloudinary uploads require no storage CORS. An existing local browser cache belongs to its old origin. |
