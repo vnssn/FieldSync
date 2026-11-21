@@ -62,12 +62,13 @@ services:
         sync: false
       - key: CLOUDINARY_FOLDER
         sync: false
+      # Preserve the operator's opt-in and secret during Blueprint updates.
       - key: AI_ENABLED
-        value: "false"
+        sync: false
       - key: AI_REPORT_PROVIDER
         value: groq
       - key: GROQ_API_KEY
-        value: ""
+        sync: false
       - key: GROQ_MODEL
         value: openai/gpt-oss-20b
       - key: OPENAI_API_KEY
