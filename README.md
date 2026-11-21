@@ -12,7 +12,7 @@ This repository implements M0-M5: local infrastructure, sessions, tenant-isolate
 
 ## Free local demo and quick start
 
-You can demo the complete project locally without cloud accounts. Docker Compose runs PostgreSQL, Redis, and MinIO; AI is disabled by default. The frontend is deployed at https://fieldsync-six.vercel.app and uses the existing Render API through a native Vercel rewrite. Render origin setup and live browser acceptance are pending; its original frontend remains available. The Render blueprint retains Cloudinary for private evidence storage with authenticated server uploads and downloads. Neon retains pooled application connections and direct migration connections. See [deployment](docs/DEPLOYMENT.md) and [Cloudinary setup](docs/CLOUDINARY_SETUP.md). The S3 adapter remains available for local MinIO and existing S3 deployments.
+You can demo the complete project locally without cloud accounts. Docker Compose runs PostgreSQL, Redis, and MinIO; AI is disabled by default. The frontend is deployed at https://fieldsync-six.vercel.app and uses the existing Render API through a native Vercel rewrite. Live browser checks passed for login/restart/logout, Groq report generation and review, offline checklist replay, submission, approval and printable archives. The corrected Cloudinary credential is deployed. Live API checks pass for photo/audio upload, worker verification, exact-byte private downloads, anonymous access denial and removal. Neon supplies pooled application and direct migration connections. See [deployment](docs/DEPLOYMENT.md) and [Cloudinary setup](docs/CLOUDINARY_SETUP.md). The S3 adapter remains available for local MinIO and existing S3 deployments.
 
 Use Node.js >=22.12 and Docker Desktop with Linux containers. In PowerShell:
 
@@ -59,7 +59,14 @@ Open assigned work online before going into the field. Worker edits are saved on
 
 Optional Render keep-alive should call `/api/v1/live`, which returns process status without database/Redis queries. The Blueprint uses this path for platform health checks. The inline worker wakes on committed job intent, waits for known job deadlines, and uses thirty-minute recovery when idle so Neon can suspend between work. Dependency readiness remains `/api/v1/health`. See the [idle compute and scheduler setup](docs/DEPLOYMENT.md#render-keep-alive-and-neon-idle-compute); these local changes require an approved rollout before enabling cron.
 
-[render.yaml](render.yaml) describes the existing API and Redis topology. Update the existing Render service during cutover; importing a new Blueprint can create duplicate resources. The Vercel frontend is live, while the Render origin update and live browser acceptance await refreshed Render access. Keep Render frontend serving enabled until Vercel login, evidence and offline checks pass. Local tests do not establish live Cloudinary capabilities or browser session persistence.
+[render.yaml](render.yaml) describes the existing Free API and Redis topology. Vercel serves the frontend, Neon supplies PostgreSQL and Cloudinary stores authenticated evidence. Browser login/restart/logout, Groq review and offline checklist replay have passed live; authenticated API tests also verify real evidence upload/download/removal, privacy and tenant isolation. The legacy Render shell remains available for existing drafts. Optional cron and further capacity measurement are separate from the completed core workflows.
+
+The opt-in hosted runner uses the existing local Playwright installation, creates records only in an isolated acceptance organization, and makes a real Groq request. Its credentials, browser profiles, screenshots and result JSON stay in ignored `.local/hosted-acceptance`. Run it only when you intend to use the deployed services:
+
+    $env:FIELDSYNC_HOSTED_ORIGIN = 'https://fieldsync-six.vercel.app'
+    npm run test:hosted
+
+The runner fails if Groq returns a manual fallback or evidence upload/verification fails. It also checks offline file replay, tenant boundaries, private cache exclusion and logout. Hosted credential failures are not hidden by local provider simulations.
 
 Cloudinary regressions: `npm run test:cloudinary` and, after building with the existing local browser prerequisites, `npm run test:cloudinary:browser`. The provider is simulated; tests do not upload to a live Cloudinary account.
 

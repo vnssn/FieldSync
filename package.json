@@ -25,6 +25,7 @@
     "test:cloudinary": "node --test --test-concurrency=1 tests/cloudinary-*.test.js",
     "test:cloudinary:browser": "node scripts/verify-cloudinary-browser.js",
     "test:hosting": "node --test --test-concurrency=1 tests/split-hosting.test.js",
+    "test:hosted": "node scripts/verify-hosted-browser.js",
     "worker": "node apps/server/src/worker.js",
     "dev": "concurrently --kill-others --names api,web --prefix-colors cyan,green \"npm run dev --workspace=@fieldsync/server\" \"npm run dev --workspace=@fieldsync/web\"",
     "infra:up": "node scripts/infra.js up",

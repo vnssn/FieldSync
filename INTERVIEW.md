@@ -1,6 +1,6 @@
 # FieldSync: Interview and Project Viva Study Guide
 
-Source snapshot: M0-M5, refreshed on 2026-11-18 for the single-service Render free-tier configuration and R2-compatible evidence PUT uploads. Final verification is recorded in [IMPLEMENTATION.md](./IMPLEMENTATION.md). Read this alongside [EGM.md](./EGM.md) and [CONTEXT.md](./CONTEXT.md). Paths below are relative to the repository root; function names identify actual implementations rather than hypothetical components. Render deployment remains gated on the user's active-account switch and approval.
+Source snapshot: M0-M5, refreshed on 2026-11-21 for direct Groq integration and the live Vercel/Render/Neon/Cloudinary topology. Actual verification is recorded in [IMPLEMENTATION.md](./IMPLEMENTATION.md). Read this alongside [EGM.md](./EGM.md) and [CONTEXT.md](./CONTEXT.md). Paths below are relative to the repository root; function names identify actual implementations. Live Groq and browser/text workflows pass. Cloudinary credentials are corrected and real evidence API upload/download/privacy/removal checks pass.
 
 Three corrections to remember before an interview:
 
@@ -17,6 +17,7 @@ Three corrections to remember before an interview:
 5. [Security, Authentication & Validation](#5-security-authentication--validation)
 6. [Testing Strategy & Engineering Trade-offs](#6-testing-strategy--engineering-trade-offs)
 7. [Top 25 Interview & Viva Questions](#7-top-25-likely-interview--viva-questions)
+8. [Direct Groq API Integration](#8-direct-groq-api-integration)
 
 ## 1. 60-Second Elevator Pitch & System Overview
 
@@ -1054,15 +1055,15 @@ The explicit Render gate applies before creating, linking, configuring or deploy
 
 ### 6.8 Why a single Render web service on the free tier?
 
-`render.yaml` selects `plan: free` for the Node web service, PostgreSQL 17 and private Key Value/Redis. Render has no free background-worker service, so `RUN_INLINE_WORKER=true` runs BullMQ inside the web process that also serves React and the API. The local standalone worker remains available with the flag false. The Render setup uses a free Hobby workspace without a credit card/payment details, no persistent disk and disabled paid AI calls; no account-linked deployment has been performed.
+`render.yaml` selects `plan: free` for the Node web service and private Key Value/Redis. PostgreSQL is on Neon Free, and the frontend is on Vercel Hobby. Render has no free background-worker service, so `RUN_INLINE_WORKER=true` runs BullMQ inside the API process. The local standalone worker remains available with the flag false. There is one existing deployed Render API; the direct Groq integration is enabled using server-only credentials.
 
 Free web services have no pre-deploy command or shell/one-off jobs. The build remains `npm ci --include=dev && npm run build`; the start command is `npm run db:migrate && npm run start --workspace=@fieldsync/server`. Transactional, locked migrations rerun safely as no-ops on restart, and a migration failure prevents both API and worker startup. `server.js` itself does not run migrations.
 
 `server.js::startServer()` owns the listener and optional runtime. SIGTERM/SIGINT trigger one idempotent shutdown: stop accepting requests, close BullMQ/reconciliation/Redis, drain active HTTP requests and jobs, then destroy shared storage and close PostgreSQL. One ten-second deadline bounds the process; interrupted jobs recover through SQL leases on the next start. Listener startup failure follows the same cleanup with a failing exit code.
 
-The trade-off is delayed background work and shared memory/CPU. Render spins the free web service down after 15 idle minutes; jobs wait until an HTTP request wakes it. Free Key Value loses all state on restart, so SQL job intent and reconciliation matter. Free PostgreSQL is limited to 1 GB and expires after 30 days, with no managed backups; export before expiration and prepare a fresh demo database/restore. A workspace supports only one free database and one free Key Value instance, and its 750 monthly free web hours plus bandwidth/build allowances constrain availability without payment details.
+The trade-off is delayed background work and shared memory/CPU. Render spins the free web service down after 15 idle minutes; jobs wait until an HTTP request wakes it. Free Key Value loses state on restart, so SQL job intent and reconciliation matter. Only the API consumes Render's 750 monthly free web-service hours; Key Value and Neon have separate limits. Process-only liveness avoids database probes, and the inline worker wakes on committed jobs with thirty-minute idle recovery so Neon can suspend between work.
 
-Evidence uses presigned PUT uploads into separately provisioned private HTTPS S3-compatible storage, including Cloudflare R2. SigV4 binds the exact staging key, Content-Type, Content-Length and SHA-256 metadata; backend byte verification and conditional promotion remain mandatory. R2 uses its S3 API endpoint, auto region, a bucket-scoped Object Read & Write token and origin-specific PUT CORS; [R2_SETUP.md](./docs/R2_SETUP.md) documents the inputs. R2 billing/included usage is separate from Render. The Blueprint alone cannot host every M0-M5 feature entirely on Render's free tier or keep the database available indefinitely. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for lifecycle, secrets, release and backup details.
+Hosted evidence uses Cloudinary authenticated raw assets. The browser sends a session-bound PUT through the Vercel origin to Render; the API validates the reserved size, MIME signature and SHA-256 before private staging/promotion. Downloads remain authorized API responses, and signed provider URLs stay on the server. MinIO supplies local S3 storage, and the S3/R2 adapter remains available for deployments that select it. Cloudinary, Neon and Render have separate provider limits. See [DEPLOYMENT.md](./docs/DEPLOYMENT.md) for the actual hosted topology, secrets, release and backup details.
 
 ## 7. Top 25 Likely Interview & Viva Questions
 
@@ -1179,3 +1180,18 @@ Redis failure makes `/health` degraded/503; inspection writes keep SQL job inten
 Using only the named files, explain one worker edit from `LocalEditor` through a committed Dexie transaction, frozen HTTP attempt, server row/receipt locks, inspection/revision/audit/receipt commit, and generation-aware local acknowledgment. Then change one assumption: lose the response, change the remote version, expire the session, switch the account, or fail the audit insert. For each, state what is durable, what is uncertain, which layer stops the operation, and which identity/version must be checked before recovery.
 
 Repeat for an AI request: trace the source revision, selected verified bytes, provider/fallback job, immutable original, human-edited confirmation and version-aware apply. Then make the source stale, lose the review response or restore into empty Redis. Explain why generation never approves findings, how original and confirmed content remain separate, and why local readiness still requires an explicit Render account-switch approval before deployment.
+
+## 8. Direct Groq API Integration
+
+The worker clicks **Draft report** after synchronizing saved checklist answers and notes. The server creates a durable assistance job with the source revision, and its inline worker makes one native-fetch call to Groq Chat Completions using `openai/gpt-oss-20b`. Zod validates the JSON result. The original suggestion is stored separately; the worker edits it and explicitly confirms the review before the report/version/provenance changes. Managers still approve submitted inspections.
+
+For an interview, explain these implementation decisions:
+
+- Server-only credentials and authenticated, assignment-scoped requests keep provider keys and unrelated tenant data out of the browser and prompt.
+- Source snapshots and optimistic versions prevent a generated draft from overwriting newer inspection work.
+- A bounded response, timeout and per-actor rate limit constrain provider requests; missing credentials or provider errors return labeled manual drafts.
+- PostgreSQL job intent, BullMQ delivery and fenced leases preserve work through restarts. Stable mutation IDs make unconfirmed review retries safe.
+- Immutable provider output and separately confirmed text make it possible to inspect what the model returned and what the worker accepted.
+- `sync: false` on the Groq key and enable flag preserves deployment settings during Render Blueprint updates.
+
+The hosted Groq request and review/provenance path have passed against the live provider. Automated contract tests use simulated success/failure responses; a successful live request establishes connectivity and response compatibility. Model quality, free-tier capacity and provider outages require separate evaluation. See `apps/server/src/modules/ai/provider.js`, `service.js`, `worker.js`, the shared AI contracts and `apps/web/src/components/ai-ui.jsx`.

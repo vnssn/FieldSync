@@ -4,9 +4,11 @@ Production frontend: **https://fieldsync-six.vercel.app**. Existing backend: **h
 
 ## Current cutover status
 
+Live browser acceptance on 2026-11-21 now verifies Vercel login with a host-only HttpOnly/Secure/Lax cookie, reload and full browser restart, Groq report generation/review/application, offline checklist/notes reload and replay, worker submission, admin approval, printable archive jobs and logout. The 390px layout has no horizontal overflow and shell caches contain no private API responses. The corrected Cloudinary secret is now deployed. Live API checks pass real PNG/WAV upload and verification, exact-byte private downloads, anonymous provider denial, cross-tenant denial and removal with no remaining provider resources. The hosted offline-file browser harness has not been rerun since the repair; local offline-file tests pass. Keep the legacy Render shell for retained drafts. The older rollout notes below record the earlier verification state.
+
 The Vercel production deployment is live. HTTP checks passed for the shell, `/login`, an inspection deep link, JavaScript service worker, missing-asset 404 and proxied `/api/v1/health`. Direct and proxied API health report PostgreSQL/Redis up. An unauthenticated `/api/v1/auth/me` returns JSON 401 without being cached or rewritten to HTML.
 
-Render access and the Vercel production Origin are now verified. The existing API is live at idle-compute release `17333e3`; its approved Vercel preflight returns 204 and foreign origins remain denied. Direct/proxied liveness and dependency health pass, with PostgreSQL/Redis up. The platform health check uses `/api/v1/live`, and inline idle recovery is thirty minutes. Optional external cron activation awaits scheduler access. **Render frontend serving remains enabled until the Vercel browser tests pass.** Authenticated browser login persistence, real Cloudinary upload/delete and production offline replay remain unverified; HTTP checks alone do not establish them.
+The existing Free API is live at `6d5cf00` with Groq enabled and the corrected Cloudinary credential. Direct/proxied liveness and dependency health pass with PostgreSQL/Redis up. Platform probes use `/api/v1/live`, and inline idle recovery is thirty minutes. Browser session persistence and offline checklist replay are verified separately from the passing real evidence API checks. Optional external cron and retiring the legacy Render shell are operational choices; its shell remains available for retained drafts.
 
 ## Monorepo configuration
 
